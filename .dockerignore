@@ -2,6 +2,12 @@ node_modules
 **/dist
 .env
 .env.production
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+deploy/tls
 .git
 *.log
 coverage

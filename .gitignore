@@ -8,6 +8,9 @@ dist
 *.key
 *.p12
 *.pfx
+*.crt
+*.cer
+deploy/tls/
 *.tsbuildinfo
 .openai/
 ui-check.png

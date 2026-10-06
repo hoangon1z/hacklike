@@ -31,3 +31,13 @@ Không đưa API key hoặc secret vào Git. API key nhà cung cấp đã xuất
 5. Kiểm tra `https://ten-mien-cua-ban/api/health` trước khi mở traffic.
 
 PostgreSQL và Redis không mở cổng công khai trong compose production. Hãy đặt reverse proxy TLS hoặc CDN phía trước cổng 80 của dịch vụ web.
+
+### HTTPS cho hacklike43.net qua Cloudflare
+
+- Lưu Cloudflare Origin Certificate tại `/etc/hacklike43/tls/origin.pem` và private key tại `/etc/hacklike43/tls/origin.key` trên server (không trong Git). Thư mục quyền 700, key quyền 600, owner root.
+- Đặt `WEB_URL=https://hacklike43.net` và `PUBLIC_SITE_URL=https://hacklike43.net` trong `.env.production`.
+- Chạy `sudo docker compose --env-file .env.production -f docker-compose.production.yml -f docker-compose.tls.yml up -d --build`.
+- Kiểm tra `sudo docker compose --env-file .env.production -f docker-compose.production.yml -f docker-compose.tls.yml exec web nginx -t`.
+- AWS Security Group cho phép TCP 443; DNS Cloudflare bật Proxied. Sau khi origin TLS hoạt động, bật Full (strict) và Always Use HTTPS. Không dùng Flexible.
+- Origin CA không được trình duyệt tin cậy khi truy cập trực tiếp origin. Chứng chỉ cần được thay trước khi hết hạn; không tự gia hạn bằng cấu hình này.
+- Mọi lệnh cập nhật production HTTPS phải dùng cả hai file Compose; không chạy `down -v` vì sẽ xóa dữ liệu database.
