@@ -1,0 +1,8 @@
+.brand-logo-image{display:block;width:200px;max-width:100%;height:auto;object-fit:contain;flex-shrink:0}
+.logo .brand-logo-image{width:190px}
+.logo .brand-logo-compact{display:none;width:38px;height:38px;object-fit:contain}
+.hl-footer .brand-logo-image{width:175px}
+.hl-page-loader .brand-logo-image{width:240px}
+@media(max-width:1080px) and (min-width:769px){.sidebar .logo .brand-logo-image{display:none}.sidebar .logo .brand-logo-compact{display:block}.sidebar .logo{padding:0;justify-content:center}}
+@media(max-width:760px){.ha-brand .brand-logo-image,.hl-brand .brand-logo-image{width:160px}}
+@media(max-width:380px){.ha-brand .brand-logo-image,.hl-brand .brand-logo-image{width:140px}}

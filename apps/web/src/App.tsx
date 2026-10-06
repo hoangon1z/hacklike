@@ -40,6 +40,7 @@ import {
 import { api, ApiError, errorText, SessionUser } from "./api";
 import { RequiredPasswordChange } from './RequiredPasswordChange';
 import { PageLoader } from './PageLoader';
+import { BrandLogo } from './BrandLogo';
 import { DashboardHome, ProfilePage, NotificationsPage, AdminAnnouncements } from "./CustomerPages";
 import { QRCodeSVG } from "qrcode.react";
 import { ManagedUsers, ManagedOrders, ManagedPayments, ManagedAudits } from './AdminManagementPages';
@@ -113,17 +114,8 @@ const serviceType = (service: Service) => {
 function Logo() {
   return (
     <div className="logo">
-      <div className="logo-badge">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 2L2 7l10 5 10-5-10-5z" />
-          <path d="M2 17l10 5 10-5" />
-          <path d="M2 12l10 5 10-5" />
-        </svg>
-      </div>
-      <div className="logo-brand">
-        <strong>Hacklike43</strong>
-        <span>SMM Portal</span>
-      </div>
+      <BrandLogo/>
+      <img className="brand-logo-compact" src="/hacklike43-icon-192.png" alt="Hacklike43" width="38" height="38"/>
     </div>
   );
 }
