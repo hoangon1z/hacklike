@@ -1,5 +1,7 @@
 # Hacklike43
 
+Nhập thành viên/số dư từ website cũ: xem [hướng dẫn migration CSV](deploy/LEGACY-IMPORT.md). Công cụ mặc định chỉ kiểm tra, không ghi dữ liệu.
+
 Nền tảng SMM reseller production gồm React, NestJS, PostgreSQL, Redis và BullMQ.
 
 ## Chạy local

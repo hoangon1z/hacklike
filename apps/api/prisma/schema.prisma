@@ -26,6 +26,7 @@ enum WalletTransactionType {
   ORDER_RELEASE
   REFUND
   ADMIN_ADJUSTMENT
+  OPENING_BALANCE
 }
 
 enum ServicePricingMode {
@@ -76,6 +77,8 @@ model User {
   id String @id @default(cuid())
   email String @unique
   passwordHash String
+  passwordChangeRequired Boolean @default(false)
+  legacyImport LegacyUserImport?
   tokenVersion Int @default(0)
   displayName String
   role UserRole @default(CUSTOMER)
@@ -88,6 +91,21 @@ model User {
   notificationReads NotificationRead[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model LegacyUserImport {
+  id String @id @default(cuid())
+  userId String @unique
+  email String @unique
+  user User @relation(fields: [userId], references: [id])
+  legacyUsername String
+  phone String?
+  openingBalance Decimal @db.Decimal(20, 2)
+  historicalDeposited Decimal @db.Decimal(20, 2)
+  legacyCreatedAt DateTime
+  rowHash String
+  sourceHash String
+  importedAt DateTime @default(now())
 }
 
 model Announcement {

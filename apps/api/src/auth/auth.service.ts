@@ -9,8 +9,8 @@ import { LoginDto, RegisterDto } from './dto/auth.dto';
 @Injectable()
 export class AuthService {
   constructor(private readonly prisma: PrismaService, private readonly jwt: JwtService, private readonly config: ConfigService) {}
-  private publicUser(user: { id:string; email:string; displayName:string; role:string; status:string }) {
-    return { id:user.id, email:user.email, displayName:user.displayName, role:user.role, status:user.status };
+  private publicUser(user: { id:string; email:string; displayName:string; role:string; status:string; passwordChangeRequired?:boolean }) {
+    return { id:user.id, email:user.email, displayName:user.displayName, role:user.role, status:user.status,passwordChangeRequired:user.passwordChangeRequired??false };
   }
   async register(dto: RegisterDto) {
     const email = dto.email.trim().toLowerCase();
@@ -42,5 +42,5 @@ export class AuthService {
   async logout(refreshToken?: string) {
     if (refreshToken) await this.prisma.refreshSession.updateMany({ where: { tokenHash: createHash('sha256').update(refreshToken).digest('hex'), revokedAt: null }, data: { revokedAt: new Date() } });
   }
-  me(userId: string) { return this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { id:true,email:true,displayName:true,role:true,status:true,wallet:{select:{balance:true,reserved:true}} } }); }
+  me(userId: string) { return this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { id:true,email:true,displayName:true,role:true,status:true,passwordChangeRequired:true,wallet:{select:{balance:true,reserved:true}} } }); }
 }

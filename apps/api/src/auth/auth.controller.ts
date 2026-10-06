@@ -5,8 +5,10 @@ import { CurrentUser } from './current-user.decorator';
 import { LoginDto, RegisterDto } from './dto/auth.dto';
 import { Public } from './public.decorator';
 import { AuthUser } from './auth.types';
+import { AllowPasswordChange } from './password-change.decorator';
 
 @Controller('auth')
+@AllowPasswordChange()
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
   private cookies(res: Response, access: string, refresh?: string) {

@@ -88,7 +88,8 @@ export class ManagementService {
  async userDetail(id:string){
   const user=await this.db.user.findUniqueOrThrow({where:{id},select:userSelect});
   const [orders,deposits,ledger]=await Promise.all([this.db.order.count({where:{userId:id}}),this.db.walletTransaction.aggregate({where:{wallet:{userId:id},type:'DEPOSIT'},_sum:{amount:true}}),this.db.walletTransaction.findMany({where:{wallet:{userId:id}},orderBy:{createdAt:'desc'},take:50})]);
-  return {user,orders,totalDeposited:deposits._sum.amount??0,ledger};
+  const legacy=await this.db.legacyUserImport.findUnique({where:{userId:id},select:{historicalDeposited:true,openingBalance:true,legacyUsername:true,phone:true,legacyCreatedAt:true,importedAt:true}});
+  return {user,orders,totalDeposited:new Prisma.Decimal(deposits._sum.amount??0).plus(legacy?.historicalDeposited??0),legacy,ledger};
  }
  async orders(q:PageQuery){
   if(q.status&&!Object.values(OrderStatus).includes(q.status as OrderStatus))fail('INVALID_FILTER',422);

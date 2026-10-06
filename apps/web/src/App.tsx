@@ -38,6 +38,7 @@ import {
   X,
 } from "lucide-react";
 import { api, ApiError, errorText, SessionUser } from "./api";
+import { RequiredPasswordChange } from './RequiredPasswordChange';
 import { DashboardHome, ProfilePage, NotificationsPage, AdminAnnouncements } from "./CustomerPages";
 import { QRCodeSVG } from "qrcode.react";
 import { ManagedUsers, ManagedOrders, ManagedPayments, ManagedAudits } from './AdminManagementPages';
@@ -3580,6 +3581,7 @@ function App() {
       </div>
     );
   if (!user) return <AuthPages key={location.pathname} onLogin={loggedIn} />;
+  if(user.passwordChangeRequired)return <RequiredPasswordChange onLogout={logout} onDone={()=>{setUser(null);navigate('/login',{replace:true,state:{passwordChanged:true}});}}/>;
   const admin = user.role === "ADMIN" || user.role === "SUPER_ADMIN";
   if (location.pathname === "/")
     return <Navigate to={admin ? "/admin" : "/dashboard"} replace />;

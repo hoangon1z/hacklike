@@ -15,6 +15,8 @@ deploy/tls/
 .openai/
 ui-check.png
 ui-login-check.png
+export_user.csv
+legacy-import-backup*.sql
 *.log
 .idea
 .vscode

@@ -8,6 +8,8 @@ node_modules
 *.p12
 *.pfx
 deploy/tls
+export_user.csv
+legacy-import-backup*.sql
 .git
 *.log
 coverage

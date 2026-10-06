@@ -7,6 +7,7 @@ import { CurrentUser } from './auth/current-user.decorator';
 import { AuthUser } from './auth/auth.types';
 import { Roles } from './auth/roles.decorator';
 import { DomainError } from './shared/domain-error';
+import { AllowPasswordChange } from './auth/password-change.decorator';
 
 class ProfileDto {
   @IsString() @MinLength(1) @MaxLength(80) displayName!: string;
@@ -30,7 +31,7 @@ export class AccountController {
     const localDay = new Date(Date.now() + offset); localDay.setUTCHours(0,0,0,0); localDay.setUTCDate(localDay.getUTCDate()-29);
     const from = new Date(localDay.getTime() - offset);
     const walletWhere = { wallet: { userId: user.sub } };
-    const [deposits, captures, refunds, count, recent, chartRows, posts] = await Promise.all([
+    const [deposits, captures, refunds, count, recent, chartRows, posts, legacy] = await Promise.all([
       this.db.walletTransaction.aggregate({where:{...walletWhere,type:'DEPOSIT'},_sum:{amount:true}}),
       this.db.walletTransaction.aggregate({where:{...walletWhere,type:'ORDER_CAPTURE'},_sum:{amount:true},_count:true}),
       this.db.walletTransaction.aggregate({where:{...walletWhere,type:'REFUND'},_sum:{amount:true}}),
@@ -38,21 +39,25 @@ export class AccountController {
       this.db.order.count({where:{userId:user.sub,createdAt:{gte:from}}}),
       this.db.walletTransaction.findMany({where:{...walletWhere,type:{in:['ORDER_CAPTURE','REFUND']},createdAt:{gte:from}},select:{amount:true,createdAt:true}}),
       this.db.announcement.findMany({where:{published:true},orderBy:{createdAt:'desc'},take:30}),
+      this.db.legacyUserImport.findUnique({where:{userId:user.sub},select:{historicalDeposited:true}}),
     ]);
     const spending = Math.max(0,-Number(captures._sum.amount??0)-Number(refunds._sum.amount??0));
     const daily = Array.from({length:30},(_,i)=>({date:new Date(localDay.getTime()+i*86400000).toISOString().slice(0,10),amount:0}));
     for(const row of chartRows){const bucket=daily.find(x=>x.date===new Date(row.createdAt.getTime()+offset).toISOString().slice(0,10));if(bucket)bucket.amount-=Number(row.amount);}
-    return {success:true,data:{totalDeposited:Number(deposits._sum.amount??0),totalSpent:spending,orderCount:count,newOrders:recent,averageOrder:captures._count?spending/captures._count:0,daily,posts}};
+    return {success:true,data:{totalDeposited:Number(deposits._sum.amount??0)+Number(legacy?.historicalDeposited??0),historicalDeposited:Number(legacy?.historicalDeposited??0),totalSpent:spending,orderCount:count,newOrders:recent,averageOrder:captures._count?spending/captures._count:0,daily,posts}};
   }
   @Patch('profile') async profile(@CurrentUser() user: AuthUser,@Body() dto: ProfileDto) {
     if(!dto.displayName.trim())throw new DomainError('INVALID_PROFILE','profile.invalid',422);
     return {success:true,data:await this.db.user.update({where:{id:user.sub},data:{displayName:dto.displayName.trim()},select:{id:true,email:true,displayName:true}})};
   }
+  @AllowPasswordChange()
   @Patch('password') async password(@CurrentUser() user: AuthUser,@Body() dto: PasswordDto) {
     const account=await this.db.user.findUniqueOrThrow({where:{id:user.sub}});
     if(!await compare(dto.currentPassword,account.passwordHash))throw new DomainError('WRONG_PASSWORD','profile.wrong_password',422);
+    if(Buffer.byteLength(dto.newPassword,'utf8')>72)throw new DomainError('PASSWORD_TOO_LONG','profile.password_too_long',422);
+    if(await compare(dto.newPassword,account.passwordHash))throw new DomainError('PASSWORD_UNCHANGED','profile.password_unchanged',422);
     const passwordHash=await hash(dto.newPassword,12);
-    await this.db.$transaction([this.db.user.update({where:{id:user.sub},data:{passwordHash,tokenVersion:{increment:1}}}),this.db.refreshSession.updateMany({where:{userId:user.sub,revokedAt:null},data:{revokedAt:new Date()}})]);
+    await this.db.$transaction([this.db.user.update({where:{id:user.sub},data:{passwordHash,passwordChangeRequired:false,tokenVersion:{increment:1}}}),this.db.refreshSession.updateMany({where:{userId:user.sub,revokedAt:null},data:{revokedAt:new Date()}})]);
     return {success:true,data:{updated:true}};
   }
   @Get('notifications') async notifications(@CurrentUser() user: AuthUser) {
