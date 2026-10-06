@@ -3008,68 +3008,40 @@ type SystemData = {
   outboxPending: number;
 };
 function SystemHealth() {
-  const [data, setData] = useState<SystemData | null>(null);
-  useEffect(() => {
-    api<SystemData>("/admin/system").then(setData);
-  }, []);
-  const rows = data
-    ? [
-        [
-          "PostgreSQL",
-          data.database.status,
-          `${data.database.users} users · ${data.database.orders} orders`,
-        ],
-        ["Outbox", "ACTIVE", `${data.outboxPending} sự kiện chờ`],
-        [
-          "API nhà cung cấp",
-          data.provider.configured
-            ? (data.provider.state?.status ?? "Đã cấu hình")
-            : "Chưa cấu hình",
-          data.provider.state?.lastCheckedAt
-            ? new Date(data.provider.state.lastCheckedAt).toLocaleString(
-                "vi-VN",
-              )
-            : "—",
-        ],
-        [
-          "SePay",
-          data.payments.sepayConfigured ? "Đã cấu hình" : "Chưa cấu hình",
-          "—",
-        ],
-        [
-          "Binance",
-          data.payments.binanceConfigured ? "Đã cấu hình" : "Chưa cấu hình",
-          "—",
-        ],
-      ]
-    : [];
-  return (
-    <div className="page">
-      <PageHead
-        eyebrow="GIÁM SÁT"
-        title="Tình trạng hệ thống"
-        desc="Dữ liệu cấu hình và vận hành thực tế."
-      />
-      <div className="health-grid">
-        {rows.map((x) => (
-          <article className="card health" key={x[0]}>
-            <div
-              className={
-                x[1] === "Chưa cấu hình" ? "health-icon pending" : "health-icon"
-              }
-            >
-              {x[1] === "Chưa cấu hình" ? "!" : "✓"}
-            </div>
-            <div>
-              <h3>{x[0]}</h3>
-              <span>{x[1]}</span>
-            </div>
-            <b>{x[2]}</b>
-          </article>
-        ))}
-      </div>
-    </div>
-  );
+  const [data,setData]=useState<SystemData|null>(null);
+  const [error,setError]=useState(''),[checking,setChecking]=useState(false);
+  useEffect(()=>{
+    let active=true;
+    const load=()=>api<SystemData>('/admin/system').then(value=>{if(active){setData(value);setError('');}}).catch(()=>{if(active)setError('Chưa tải được tình trạng hệ thống. Vui lòng thử lại.');});
+    void load();const timer=window.setInterval(()=>void load(),30000);
+    return()=>{active=false;window.clearInterval(timer);};
+  },[]);
+  async function checkProvider(){
+    if(checking)return;setChecking(true);setError('');
+    try{setData(await api<SystemData>('/admin/system/provider/check',{method:'POST'}));}
+    catch{setError('Chưa hoàn thành kiểm tra. Vui lòng thử lại sau.');}
+    finally{setChecking(false);}
+  }
+  const state=data?.provider.state;
+  const status=!data?.provider.configured?'NOT_CONFIGURED':state?.status??'UNKNOWN';
+  const labels:Record<string,string>={HEALTHY:'Kết nối tốt',LOW_BALANCE:'Kết nối tốt · Số dư thấp',UNAVAILABLE:'Không kết nối được',UNKNOWN:'Chưa kiểm tra',NOT_CONFIGURED:'Chưa cấu hình'};
+  const rows=data?[
+    {title:'PostgreSQL',status:'Hoạt động',detail:`${data.database.users} tài khoản · ${data.database.orders} đơn`,ok:true},
+    {title:'Outbox',status:'Hàng đợi sự kiện',detail:`${data.outboxPending} sự kiện chờ`,ok:true},
+    {title:'API nhà cung cấp',status:labels[status]??'Cần kiểm tra',detail:state?.lastCheckedAt?`Kiểm tra gần nhất: ${new Date(state.lastCheckedAt).toLocaleString('vi-VN')}`:'Chưa có lần kiểm tra kết nối được ghi nhận.',ok:status==='HEALTHY'},
+    {title:'SePay',status:data.payments.sepayConfigured?'Đã cấu hình':'Chưa cấu hình',detail:'Trạng thái cấu hình, không phải xác nhận kết nối.',ok:data.payments.sepayConfigured},
+    {title:'Binance',status:data.payments.binanceConfigured?'Đã cấu hình':'Chưa cấu hình',detail:'Trạng thái cấu hình, không phải xác nhận kết nối.',ok:data.payments.binanceConfigured},
+  ]:[];
+  return <div className="page">
+    <PageHead eyebrow="GIÁM SÁT" title="Tình trạng hệ thống" desc="API nhà cung cấp được kiểm tra khi khởi động và mỗi 3 phút. Trang cập nhật trạng thái mỗi 30 giây."/>
+    <div className="system-health-actions"><button className="secondary" disabled={checking} onClick={()=>void checkProvider()}><RefreshCw size={16}/>{checking?'Đang kiểm tra…':'Kiểm tra API nhà cung cấp'}</button></div>
+    {error&&<p className="form-error" role="alert">{error}</p>}
+    {!data&&!error&&<p role="status">Đang tải tình trạng hệ thống…</p>}
+    <div className="health-grid">{rows.map(row=><article className="card health" key={row.title}>
+      <div className={row.ok?'health-icon':'health-icon pending'} aria-hidden="true">{row.ok?'✓':'!'}</div>
+      <div><h3>{row.title}</h3><span>{row.status}</span></div><b>{row.detail}</b>
+    </article>)}</div>
+  </div>;
 }
 type AdminSettings = {
   supportTelegram: string;

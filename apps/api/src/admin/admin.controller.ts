@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Put } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Put, Post } from "@nestjs/common";
+import { ProviderHealthService } from '../provider/provider-health.service';
 import { Roles } from "../auth/roles.decorator";
 import { PrismaService } from "../prisma/prisma.service";
 import { ServicesService } from "../services/services.service";
@@ -43,6 +44,7 @@ export class AdminController {
     private readonly management: ManagementService,
     private readonly services: ServicesService,
     private readonly config: ConfigService,
+    private readonly providerHealth: ProviderHealthService,
     private readonly wallets: WalletsService,
     @InjectQueue("orders") private readonly ordersQueue: Queue,
   ) {}
@@ -318,7 +320,7 @@ export class AdminController {
       data: {
         database: { status: "ACTIVE", users, services, orders },
         provider: {
-          configured: Boolean(this.config.get("SMM_PROVIDER_API_KEY")),
+          configured: this.providerHealth.configured(),
           state: provider,
         },
         payments: {
@@ -335,6 +337,10 @@ export class AdminController {
         outboxPending: jobs,
       },
     };
+  }
+  @Post('system/provider/check') async checkProvider() {
+    await this.providerHealth.check();
+    return this.system();
   }
   @Get("settings") async settings() {
     const rows = await this.prisma.systemSetting.findMany({

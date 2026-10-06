@@ -118,6 +118,7 @@ button {
   border-right: 1px solid var(--line);
 }
 
+.system-health-actions{display:flex;justify-content:flex-end;margin:0 0 16px}.system-health-actions button{display:inline-flex;align-items:center;gap:8px}.health b{overflow-wrap:anywhere}
 /* Logo */
 .logo {
   height: 60px;
