@@ -1,0 +1,23 @@
+{
+  "name": "svn-social-platform",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,magenta \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm run dev -w @svn/api",
+    "dev:web": "wait-on -t 60000 http-get://127.0.0.1:4000/api/health && npm run dev -w @svn/web -- --host 127.0.0.1",
+    "build": "npm run build -w @svn/contracts && npm run build -w @svn/api && npm run build -w @svn/web",
+    "typecheck": "npm run typecheck -w @svn/contracts && npm run typecheck -w @svn/api && npm run typecheck -w @svn/web",
+    "db:generate": "npm run db:generate -w @svn/api",
+    "db:migrate": "npm run db:migrate -w @svn/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3",
+    "wait-on": "^8.0.2"
+  }
+}

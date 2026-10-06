@@ -1,0 +1,93 @@
+API URL	https://subvietnam.net/api/v2 
+API Key (TOKEN)	Lấy tại đây
+HTTP Method	POST
+Content-Type	application/json
+Response	JSON
+Tỉ giá	25,000
+Services
+Add order
+Order status
+Multiple orders status
+Balance
+Parameters	Description
+key	API Key
+action	"services"
+Example response
+[
+    {
+        "service": 1,
+        "name": "Facebook views",
+        "type": "Default",
+        "category": "Facebook",
+        "rate": "2.5",
+        "min": "200",
+        "max": "10000",
+        "refill": true
+    },
+    {
+        "service": 2,
+        "name": "Tiktok views",
+        "type": "Default",
+        "category": "Tiktok",
+        "rate": "4",
+        "min": "10",
+        "max": "1500",
+        "refill": false
+    }
+]
+Add order
+Parameters	Description
+key	API Key
+action	"add"
+service	Service ID
+link	Link
+quantity	Needed quantity
+Example response
+{
+    "order": 99999
+}
+Order status
+Parameters	Description
+key	API Key
+action	"status"
+order	Order ID
+Example response
+{
+    "charge": "2.5",
+    "start_count": "168",
+    "status": "Completed",
+    "remains": "-2"
+}
+Status: Pending, Processing, In progress, Completed, Partial, Canceled
+
+Parameters	Description
+key	API Key
+action	"status"
+orders	Order IDs separated by comma (E.g: 123,456,789) (Limit 100)
+Example response
+{
+    "123": {
+        "charge": "0.27819",
+        "start_count": "3572",
+        "status": "Partial",
+        "remains": "157"
+    },
+    "456": {
+        "error": "Incorrect order ID"
+    },
+    "789": {
+        "charge": "1.44219",
+        "start_count": "234",
+        "status": "In progress",
+        "remains": "10"
+    }
+}
+
+Parameters	Description
+key	API Key
+action	"balance"
+Example response
+{
+    "balance": "343423",
+    "currency": "VND"
+}

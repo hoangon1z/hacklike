@@ -1,0 +1,8 @@
+ALTER TABLE "User" ADD COLUMN "tokenVersion" INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE "AdminProviderCommand" (
+ "id" TEXT PRIMARY KEY, "orderId" TEXT NOT NULL REFERENCES "Order"("id"),
+ "kind" TEXT NOT NULL, "status" TEXT NOT NULL DEFAULT 'PENDING', "actorId" TEXT NOT NULL,
+ "reason" TEXT NOT NULL, "responseId" TEXT, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ "updatedAt" TIMESTAMP(3) NOT NULL,
+ UNIQUE ("orderId", "kind")
+);

@@ -1,0 +1,4 @@
+export type SessionUser={id:string;email:string;displayName:string;role:'CUSTOMER'|'ADMIN'|'SUPER_ADMIN';status:string;wallet?:{balance:string;reserved:string}};
+export class ApiError extends Error{constructor(public code:string,public requestId?:string){super(code)}}
+export async function api<T>(path:string,options:RequestInit={}){const response=await fetch('/api'+path,{...options,credentials:'include',headers:{'content-type':'application/json',...(options.headers||{})}});const body=await response.json();if(!response.ok||!body.success)throw new ApiError(body.error?.code||'INTERNAL_ERROR',body.error?.requestId);return body.data as T}
+export const errorText=(code:string)=>({UNAUTHORIZED:'Email hoặc mật khẩu chưa chính xác.',VALIDATION_ERROR:'Thông tin chưa hợp lệ. Vui lòng kiểm tra lại.',INTERNAL_ERROR:'Hệ thống đang bận. Vui lòng thử lại sau.'}[code]||'Không thể hoàn thành thao tác. Vui lòng thử lại.');

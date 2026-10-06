@@ -1,0 +1,365 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+}
+
+enum WalletTransactionType {
+  DEPOSIT
+  ORDER_RESERVE
+  ORDER_CAPTURE
+  ORDER_RELEASE
+  REFUND
+  ADMIN_ADJUSTMENT
+}
+
+enum ServicePricingMode {
+  PERCENTAGE
+  FIXED_MARKUP
+  FIXED_PRICE
+}
+
+enum OrderStatus {
+  CREATED
+  SCHEDULED
+  FUNDS_RESERVED
+  QUEUED
+  WAITING_PROVIDER_BALANCE
+  WAITING_PROVIDER_SYNC
+  PRICE_CONFLICT
+  SUBMITTING
+  SUBMISSION_UNKNOWN
+  SUBMITTED
+  IN_PROGRESS
+  COMPLETED
+  PARTIAL
+  CANCELED
+  REFUNDED
+  MANUAL_REVIEW
+}
+
+enum DepositMethod {
+  BANKING
+  USDT_TRC20
+  USDT_BEP20
+}
+
+enum DepositStatus {
+  CREATED
+  WAITING
+  CONFIRMING
+  COMPLETED
+  EXPIRED
+  UNDERPAID
+  OVERPAID
+  UNMATCHED
+  MANUAL_REVIEW
+  REJECTED
+}
+
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  passwordHash String
+  tokenVersion Int @default(0)
+  displayName String
+  role UserRole @default(CUSTOMER)
+  status UserStatus @default(ACTIVE)
+  wallet Wallet?
+  orders Order[]
+  deposits DepositRequest[]
+  sessions RefreshSession[]
+  announcements Announcement[]
+  notificationReads NotificationRead[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Announcement {
+  id String @id @default(cuid())
+  authorId String
+  author User @relation(fields: [authorId], references: [id])
+  title String
+  content String
+  kind String @default("NEWS")
+  published Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([published, createdAt])
+}
+
+model NotificationRead {
+  userId String
+  eventId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readAt DateTime @default(now())
+  @@id([userId, eventId])
+}
+
+model RefreshSession {
+  id String @id @default(cuid())
+  userId String
+  tokenHash String @unique
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@index([userId, expiresAt])
+}
+
+model Wallet {
+  id String @id @default(cuid())
+  userId String @unique
+  balance Decimal @default(0) @db.Decimal(20, 2)
+  reserved Decimal @default(0) @db.Decimal(20, 2)
+  version Int @default(0)
+  user User @relation(fields: [userId], references: [id])
+  transactions WalletTransaction[]
+  updatedAt DateTime @updatedAt
+}
+
+model WalletTransaction {
+  id String @id @default(cuid())
+  walletId String
+  type WalletTransactionType
+  amount Decimal @db.Decimal(20, 2)
+  balanceAfter Decimal @db.Decimal(20, 2)
+  referenceType String
+  referenceId String
+  description String
+  idempotencyKey String @unique
+  wallet Wallet @relation(fields: [walletId], references: [id])
+  createdAt DateTime @default(now())
+  @@index([walletId, createdAt])
+}
+
+model ServiceCategory {
+  id String @id @default(cuid())
+  name String
+  slug String @unique
+  sortOrder Int @default(0)
+  enabled Boolean @default(true)
+  services Service[]
+}
+
+model Service {
+  id String @id @default(cuid())
+  providerServiceId String @unique
+  categoryId String
+  providerName String
+  providerType String @default("Default")
+  providerDescription String?
+  displayName String
+  providerRate Decimal @db.Decimal(20, 6)
+  previousProviderRate Decimal? @db.Decimal(20, 6)
+  sellingRate Decimal @db.Decimal(20, 6)
+  pricingMode ServicePricingMode @default(PERCENTAGE)
+  markupValue Decimal @default(20) @db.Decimal(12, 4)
+  minimumSafeMargin Decimal @default(2) @db.Decimal(12, 4)
+  providerEnabled Boolean @default(true)
+  adminEnabled Boolean @default(false)
+  systemEnabled Boolean @default(true)
+  min Int
+  max Int
+  refill Boolean @default(false)
+  sortOrder Int @default(0)
+  category ServiceCategory @relation(fields: [categoryId], references: [id])
+  orders Order[]
+  priceHistory ServicePriceHistory[]
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  @@index([categoryId, adminEnabled, systemEnabled])
+}
+
+model ServicePriceHistory {
+  id String @id @default(cuid())
+  serviceId String
+  oldProviderRate Decimal @db.Decimal(20, 6)
+  newProviderRate Decimal @db.Decimal(20, 6)
+  oldSellingRate Decimal @db.Decimal(20, 6)
+  newSellingRate Decimal @db.Decimal(20, 6)
+  source String
+  service Service @relation(fields: [serviceId], references: [id])
+  createdAt DateTime @default(now())
+  @@index([serviceId, createdAt])
+}
+
+model Order {
+  id String @id @default(cuid())
+  publicId String @unique
+  userId String
+  serviceId String
+  providerOrderId String?
+  idempotencyKey String @unique
+  link String
+  quantity Int
+  comments String?
+  providerRateSnapshot Decimal @db.Decimal(20, 6)
+  sellingRateSnapshot Decimal @db.Decimal(20, 6)
+  costAmount Decimal @db.Decimal(20, 2)
+  chargeAmount Decimal @db.Decimal(20, 2)
+  status OrderStatus @default(CREATED)
+  publicMessage String?
+  remains Int?
+  startCount Int?
+  submissionToken String? @unique
+  nextRetryAt DateTime?
+  scheduledAt DateTime?
+  user User @relation(fields: [userId], references: [id])
+  service Service @relation(fields: [serviceId], references: [id])
+  statusHistory OrderStatusHistory[]
+  attempts OrderSubmissionAttempt[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([providerOrderId])
+  @@index([status, nextRetryAt, createdAt])
+  @@index([status, scheduledAt])
+  @@index([userId, createdAt])
+}
+
+model OrderStatusHistory {
+  id String @id @default(cuid())
+  orderId String
+  fromStatus OrderStatus?
+  toStatus OrderStatus
+  reasonCode String?
+  actorId String?
+  order Order @relation(fields: [orderId], references: [id])
+  createdAt DateTime @default(now())
+  @@index([orderId, createdAt])
+}
+
+model OrderSubmissionAttempt {
+  id String @id @default(cuid())
+  orderId String
+  attempt Int
+  requestStartedAt DateTime
+  responseReceivedAt DateTime?
+  outcome String?
+  providerHttpStatus Int?
+  safeErrorCode String?
+  order Order @relation(fields: [orderId], references: [id])
+  @@unique([orderId, attempt])
+}
+
+model AdminProviderCommand {
+  id String @id @default(cuid())
+  orderId String
+  kind String
+  status String @default("PENDING")
+  actorId String
+  reason String
+  responseId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([orderId, kind])
+}
+
+model UsdtDepositAllocation {
+  network String
+  address String
+  amount Decimal @db.Decimal(20, 6)
+  createdAt DateTime @default(now())
+  @@id([network, address, amount])
+}
+
+model DepositRequest {
+  id String @id @default(cuid())
+  publicId String @unique
+  userId String
+  method DepositMethod
+  status DepositStatus @default(CREATED)
+  requestedVnd Decimal @db.Decimal(20, 2)
+  creditedVnd Decimal? @db.Decimal(20, 2)
+  usdtRate Decimal? @db.Decimal(20, 2)
+  expectedUsdt Decimal? @db.Decimal(20, 6)
+  paymentCode String? @unique
+  network String?
+  destinationAddress String?
+  expiresAt DateTime
+  user User @relation(fields: [userId], references: [id])
+  paymentTransactions PaymentTransaction[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status, expiresAt])
+}
+
+model PaymentTransaction {
+  id String @id @default(cuid())
+  depositRequestId String?
+  provider String
+  externalId String
+  network String?
+  txHash String?
+  logIndex Int?
+  amount Decimal @db.Decimal(20, 8)
+  rawPayload Json
+  depositRequest DepositRequest? @relation(fields: [depositRequestId], references: [id])
+  receivedAt DateTime
+  createdAt DateTime @default(now())
+  @@unique([provider, externalId])
+  @@unique([network, txHash, logIndex])
+}
+
+model SystemSetting {
+  key String @id
+  value Json
+  isPublic Boolean @default(false)
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+}
+
+model ProviderState {
+  id String @id @default("primary")
+  balance Decimal @default(0) @db.Decimal(20, 2)
+  currency String @default("VND")
+  status String @default("UNKNOWN")
+  lowBalanceThreshold Decimal @default(2000000) @db.Decimal(20, 2)
+  lastCheckedAt DateTime?
+  incidentOpenedAt DateTime?
+  updatedAt DateTime @updatedAt
+}
+
+model OutboxEvent {
+  id String @id @default(cuid())
+  aggregateType String
+  aggregateId String
+  eventType String
+  payload Json
+  processedAt DateTime?
+  attempts Int @default(0)
+  createdAt DateTime @default(now())
+  @@index([processedAt, createdAt])
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+  actorId String?
+  action String
+  entityType String
+  entityId String?
+  before Json?
+  after Json?
+  ipAddress String?
+  requestId String?
+  createdAt DateTime @default(now())
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId])
+}

@@ -1,0 +1,23 @@
+# Landing Hacklike43
+
+Trang công khai `/` dùng React, ảnh 3D được tạo bằng imagegen và GSAP/ScrollTrigger. Các icon nền tảng SVG được dùng chung với hệ thống user/admin. Các nút đăng nhập/đăng ký dùng `/login` và `/register`; không tự tạo tài khoản hay giao dịch. Landing không gọi API riêng tư, không chứa số liệu, đánh giá khách hàng hoặc bảng giá giả.
+
+## Ảnh 3D
+
+Dùng công cụ imagegen tích hợp, không dùng CLI. Các bản PNG nền trong suốt đã được lưu trong project: `public/landing-hero-blue-3d.png` và `public/landing-workflow-blue-3d.png`. Ảnh không phải vector SVG; đây là render 3D dạng raster theo yêu cầu bổ sung. Các SVG minh họa cũ không còn được sử dụng.
+
+Prompt hero: “Use case: stylized-concept. Asset type: a production website hero illustration for Hacklike43, a Vietnamese social media service management portal. Generate a high quality genuinely three-dimensional studio render, isolated on transparent background, square composition with generous transparent padding. Subject: a clean floating blue-and-white isometric dashboard platform with a central rounded cobalt-blue hub cube, sophisticated glass-like translucent panels and white rounded cards, surrounded by four distinct beautifully crafted 3D social tiles: recognizable Facebook white f on Facebook blue, recognizable TikTok musical note on dark navy with cyan/pink accents, recognizable YouTube white play triangle on its red tile, recognizable Telegram white paper plane on light blue. Logos must be crisp and correct, not invented letter approximations. The central hub should have a simple white stacked-layer geometric symbol, not text. Materials: polished ceramic, satin plastic, lightly frosted glass, subtle bevels, believable soft ambient shadows, restrained premium SaaS editorial aesthetic, not a cartoon toy pile. Perspective: front-right isometric, central platform dominant, floating icons balanced around it, all objects fully visible, no cut edges. Brand palette must match the existing site: #246BCE primary, #1A5AB3 deep blue, #EFF6FF pale blue, #FFFFFF white, #0F172A navy; brand-specific colors only on the social tiles. Absolutely no orange/coral/peach brand accents, no cream background. Lighting soft neutral studio. No UI screenshot, no illegible texts, no numbers, no watermark, no webpage framing. This is a single standalone 3D image asset for placing beside text, NOT a full landing page screenshot.”
+
+Prompt workflow: “Use case: stylized-concept. Asset type: secondary 3D illustration for Hacklike43 website workflow section. Create an isolated polished three-dimensional studio render on genuinely transparent background, square composition, complete subject uncropped with padding. A white and cobalt-blue rounded scheduling dashboard card, with a clearly recognizable three-dimensional analog clock in front, a small blue calendar with minimalist blank squares, a tasteful small blue check-mark tile and rounded wallet shape arranged as one elegant balanced compact composition. Brand palette #246BCE, #1A5AB3, #EFF6FF, #FFFFFF, #0F172A only. Style premium SaaS, satin ceramic and lightly frosted glass, precise bevels, soft neutral studio light and natural soft ambient shadows. No orange, no coral, no beige, no colored background. Match a premium blue-and-white 3D hero asset. No readable text, no numbers, no fake transactions, no watermark. Output is a real rendered image asset, not SVG, not a screenshot, not a flat vector illustration.”
+
+## SEO production
+
+`npm run build -w @svn/web` tạo HTML có sẵn toàn bộ nội dung landing, metadata Open Graph/Twitter, WebSite JSON-LD, robots.txt và sitemap.xml. Không cần JavaScript để đọc nội dung landing. Các trang ứng dụng dùng `app.html`, `noindex` và không có canonical trỏ nhầm về trang chủ.
+
+Trước khi build public, đặt `PUBLIC_SITE_URL` là origin thật, ví dụ `https://your-domain.vn` (không dùng site mẹ). Có thể đặt trong biến môi trường build hoặc `.env.production.local` của web. Build Docker cần truyền `--build-arg PUBLIC_SITE_URL=https://your-domain.vn`. Không ghi API key vào cấu hình frontend.
+
+Nếu chưa có domain, build chủ động tắt indexing và không tạo canonical giả. Sau khi có domain: build lại, triển khai HTTPS, kiểm tra robots/sitemap/canonical và đăng ký Search Console. SEO kỹ thuật không bảo đảm thứ hạng tìm kiếm.
+
+Deployment ngoài Nginx đi kèm: serve `/` từ `dist/index.html`, các tuyến đăng nhập/dashboard/admin fallback `dist/app.html`. Các tệp asset cần trả đúng MIME và 404 khi không tồn tại.
+
+Hiệu ứng tôn trọng `prefers-reduced-motion`, được cleanup khi unmount và không che nội dung nếu GSAP không tải được. Tất cả CSS landing có scope `.hl-landing`; không thay đổi giao diện user/admin.
