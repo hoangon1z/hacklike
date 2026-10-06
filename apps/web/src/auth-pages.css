@@ -22,3 +22,9 @@
 @media(max-width:1000px){.ha-page .ha-main{gap:32px}.ha-page .ha-form-panel{padding:28px}.ha-page .ha-showcase h2{font-size:30px}.ha-page .ha-art{width:min(300px,90%)}}
 @media(max-width:760px){.ha-page .ha-header{padding-block:20px;min-height:76px}.ha-page .ha-main{max-width:520px;padding-block:20px 32px;grid-template-columns:minmax(0,1fr);gap:0}.ha-page .ha-showcase{display:none}.ha-page .ha-form-panel{padding:28px 24px;border:1px solid #e2e8f0;border-radius:20px}.ha-page .ha-form-panel h1{font-size:28px}.ha-page .ha-footer{padding-block:20px;justify-content:center}}
 @media(max-width:380px){.ha-page .ha-main{padding-inline:16px}.ha-page .ha-form-panel{padding:24px 20px}}
+.ha-page .ha-submit{position:relative;overflow:hidden;min-height:52px;transition:background .18s,box-shadow .18s;isolation:isolate}
+.ha-page .ha-submit:disabled{opacity:1;background:#246bce;box-shadow:none;cursor:wait}
+.ha-page .ha-submit.is-loading::before{content:'';position:absolute;inset:0;background:linear-gradient(100deg,transparent 20%,#ffffff18 50%,transparent 80%);transform:translateX(-100%);animation:ha-submit-shimmer 1.6s ease-in-out infinite;z-index:-1}
+.ha-page .ha-submit svg{flex-shrink:0}.ha-page .ha-request-status{min-height:22px;margin:8px 0 0;text-align:center;font-size:10px;line-height:1.8;color:#64748b}
+@keyframes ha-submit-shimmer{to{transform:translateX(100%)}}
+@media(prefers-reduced-motion:reduce){.ha-page .ha-submit.is-loading::before{animation:none}.ha-page .ha-spinner{animation:none}}

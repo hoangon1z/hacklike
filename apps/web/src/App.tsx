@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { api, ApiError, errorText, SessionUser } from "./api";
 import { RequiredPasswordChange } from './RequiredPasswordChange';
+import { PageLoader } from './PageLoader';
 import { DashboardHome, ProfilePage, NotificationsPage, AdminAnnouncements } from "./CustomerPages";
 import { QRCodeSVG } from "qrcode.react";
 import { ManagedUsers, ManagedOrders, ManagedPayments, ManagedAudits } from './AdminManagementPages';
@@ -3545,22 +3546,29 @@ function App() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const location = useLocation();
+  const sessionRevision=useRef(0);
   useEffect(() => {
     const refresh = () => api<SessionUser>("/auth/me").then(setUser).catch(() => {});
     window.addEventListener("profile-updated", refresh);
     return () => window.removeEventListener("profile-updated", refresh);
   }, []);
   useEffect(() => {
-    api<SessionUser>("/auth/me")
-      .then(setUser)
-      .catch(() =>
-        api<{ user: SessionUser }>("/auth/refresh", { method: "POST" })
-          .then((x) => setUser(x.user))
-          .catch(() => null),
-      )
-      .finally(() => setLoading(false));
+    const controller=new AbortController(),revision=sessionRevision.current;
+    let active=true;
+    const timeout=window.setTimeout(()=>controller.abort(),10000);
+    api<SessionUser>("/auth/me",{signal:controller.signal})
+      .catch(reason=>{
+        if(!(reason instanceof ApiError)||reason.code!=='UNAUTHORIZED')throw reason;
+        return api<{user:SessionUser}>("/auth/refresh",{method:'POST',signal:controller.signal}).then(x=>x.user);
+      })
+      .then(value=>{if(active&&revision===sessionRevision.current)setUser(value);})
+      .catch(()=>null)
+      .finally(()=>{window.clearTimeout(timeout);if(active&&revision===sessionRevision.current)setLoading(false);});
+    return ()=>{active=false;controller.abort();window.clearTimeout(timeout);};
   }, []);
   function loggedIn(u: SessionUser) {
+    sessionRevision.current++;
+    setLoading(false);
     setUser(u);
     navigate(
       u.role === "ADMIN" || u.role === "SUPER_ADMIN" ? "/admin" : "/dashboard",
@@ -3573,13 +3581,8 @@ function App() {
     navigate("/", { replace: true });
   }
   if (location.pathname === '/') return <LandingPage />;
-  if (loading)
-    return (
-      <div className="app-loading">
-        <Logo />
-        <span>Đang khởi động…</span>
-      </div>
-    );
+  if(loading&&!user&&(location.pathname==='/login'||location.pathname==='/register'))return <AuthPages key={location.pathname} onLogin={loggedIn} checkingSession/>;
+  if (loading)return <PageLoader/>;
   if (!user) return <AuthPages key={location.pathname} onLogin={loggedIn} />;
   if(user.passwordChangeRequired)return <RequiredPasswordChange onLogout={logout} onDone={()=>{setUser(null);navigate('/login',{replace:true,state:{passwordChanged:true}});}}/>;
   const admin = user.role === "ADMIN" || user.role === "SUPER_ADMIN";
