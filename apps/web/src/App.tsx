@@ -13,6 +13,7 @@ import { OrderHistoryTab } from './components/smm/OrderHistoryTab';
 import './smm-panel.css';
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { AdminFinanceOverview } from './AdminFinanceOverview';
+import { AdminProviderBalance } from './AdminProviderBalance';
 import { LandingPage } from './LandingPage';
 import { PlatformIcon } from './PlatformIcon';
 import { AuthPages } from './AuthPages';
@@ -1787,6 +1788,7 @@ function AdminDashboard() {
         </button>
       </PageHead>
       {error && <div className="form-error" role="alert">{error}</div>}
+      <AdminProviderBalance />
       <AdminFinanceOverview />
       {!data ? <div className="card admin-overview-loading" role="status">{loading ? "Đang tải số liệu tổng quan…" : "Chưa có số liệu để hiển thị."}</div> : <>
       <div className="stats">
