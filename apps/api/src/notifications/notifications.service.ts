@@ -41,26 +41,27 @@ export class NotificationsService {
       update: { balance, currency, status: "LOW_BALANCE", lastCheckedAt: now },
     });
     const token = this.config.get<string>("TELEGRAM_BOT_TOKEN");
-    const chatId = this.config.get<string>("TELEGRAM_ADMIN_CHAT_ID");
-    if (!token || !chatId) return;
+    const chatIds = (this.config.get<string>("TELEGRAM_ADMIN_CHAT_ID") ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value, index, values) => /^-?\d+$/.test(value) && values.indexOf(value) === index);
+    if (!token || !chatIds.length) return;
     const claimed = await this.prisma.providerState.updateMany({
       where: { id: "primary", incidentOpenedAt: null },
       data: { incidentOpenedAt: now },
     });
     if (claimed.count !== 1) return;
     const text = `Cảnh báo số dư nguồn thấp\nSố dư: ${balance} ${currency}\nNgưỡng cảnh báo: ${(current?.lowBalanceThreshold ?? new Prisma.Decimal(2000000)).toString()} VND\nChi phí đơn đang xét: ${required.toString()} VND\nMã đơn: ${orderId}`;
-    try {
-      const response = await fetch(
-        `https://api.telegram.org/bot${token}/sendMessage`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, text }),
-          signal: AbortSignal.timeout(8000),
-        },
-      );
+    const deliveries = await Promise.allSettled(chatIds.map(async (chatId) => {
+      const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text }),
+        signal: AbortSignal.timeout(8000),
+      });
       if (!response.ok) throw new Error(`TELEGRAM_HTTP_${response.status}`);
-    } catch {
+    }));
+    if (deliveries.every((delivery) => delivery.status === "rejected")) {
       await this.prisma.providerState.updateMany({
         where: { id: "primary", incidentOpenedAt: now },
         data: { incidentOpenedAt: null },
