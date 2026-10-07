@@ -5,13 +5,15 @@ const {Prisma}=require('@prisma/client');
 const {BinanceService,depositIdentity}=require('../dist/payments/binance.service');
 const remote={id:'remote',coin:'USDT',amount:'4.001234',network:'BSC',status:1,address:'0xABC',txId:'tx',insertTime:Date.now()};
 function fixture({candidates=[],duplicate=false,status='WAITING'}={}){
-  const state={credits:[],payments:[],reviews:0,where:null};
-  const request={id:'request',userId:'customer',requestedVnd:new Prisma.Decimal(100000),status};
+  const state={credits:[],payments:[],reviews:0,where:null,alerts:[]};
+  const request={id:'request',publicId:'DEP-TEST',userId:'customer',requestedVnd:new Prisma.Decimal(100000),usdtRate:new Prisma.Decimal(25000),status};
   const tx={
     $queryRaw:async()=>[],
     $executeRaw:async()=>1,
-    paymentTransaction:{findFirst:async()=>duplicate?{id:'duplicate'}:null,create:async({data})=>{state.payments.push(data);}},
-    depositRequest:{findMany:async({where})=>{state.where=where;return candidates;},findUniqueOrThrow:async()=>request,updateMany:async()=>{state.reviews++;},update:async()=>{}},
+    paymentTransaction:{findFirst:async()=>duplicate?{id:'duplicate',depositRequestId:'request'}:null,create:async({data})=>{state.payments.push(data);}},
+    depositRequest:{findUnique:async()=>request,findMany:async({where})=>{state.where=where;return candidates;},findUniqueOrThrow:async()=>request,updateMany:async()=>{state.reviews++;},update:async()=>{}},
+    user:{findUnique:async()=>({displayName:'Test customer'})},
+    outboxEvent:{createMany:async({data})=>{for(const item of data)if(!state.alerts.some(x=>x.id===item.id))state.alerts.push(item);}},
   };
   const service=new BinanceService({get:()=>''},{$transaction:async fn=>fn(tx)},{deposit:async(...args)=>state.credits.push(args)});
   return {service,state};
@@ -51,4 +53,31 @@ test('on-time deposit with late confirmation retains VND snapshot and request id
   assert.equal(await service.applyDeposit(remote),true);
   assert.equal(state.credits[0][2].toNumber(),100000);
   assert.equal(state.credits[0][4],'deposit:binance:request:request');
+});
+test('blockchain-only confirmation credits but never sends Binance success alert',async()=>{
+  const {service,state}=fixture({candidates:[{id:'request'}]});
+  await service.applyDeposit(remote,false);
+  assert.equal(state.credits.length,1);assert.equal(state.alerts.length,0);
+});
+test('Binance confirmed and credited deposit queues success with VND snapshot',async()=>{
+  const {service,state}=fixture({candidates:[{id:'request'}]});
+  await service.applyDeposit(remote,true);
+  assert.equal(state.alerts.length,1);assert.equal(state.alerts[0].id,'telegram-usdt-request');
+  assert.match(state.alerts[0].payload.text,/Binance đã nhận tiền/);
+  assert.match(state.alerts[0].payload.text,/100\.000 ₫/);
+});
+test('late Binance confirmation after fallback notifies once and never credits twice',async()=>{
+  const {service,state}=fixture({duplicate:true,status:'COMPLETED'});
+  await service.applyDeposit(remote,true);await service.applyDeposit(remote,true);
+  assert.equal(state.credits.length,0);assert.equal(state.alerts.length,1);
+});
+test('pending Binance deposit and unmatched deposit never queue success alerts',async()=>{
+  const {service,state}=fixture();
+  await service.applyDeposit({...remote,status:0},true);await service.applyDeposit(remote,true);
+  assert.equal(state.credits.length,0);assert.equal(state.alerts.length,0);
+});
+test('activation cutoff never replays historical USDT success alerts',async()=>{
+  const {service,state}=fixture({duplicate:true,status:'COMPLETED'});
+  await service.applyDeposit(remote,true,remote.insertTime+1000);
+  assert.equal(state.alerts.length,0);assert.equal(state.credits.length,0);
 });

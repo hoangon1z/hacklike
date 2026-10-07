@@ -3,12 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProviderService } from './provider.service';
 import { providerBalanceVnd } from '../shared/provider-money';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class ProviderHealthService implements OnModuleInit, OnModuleDestroy {
   private timer?: ReturnType<typeof setInterval>;
   private pending?: Promise<unknown>;
-  constructor(private readonly db: PrismaService, private readonly provider: ProviderService, private readonly config: ConfigService) {}
+  constructor(private readonly db: PrismaService, private readonly provider: ProviderService, private readonly config: ConfigService, private readonly notifications: NotificationsService) {}
   configured() { return Boolean(this.config.get('SMM_PROVIDER_URL') && this.config.get('SMM_PROVIDER_API_KEY')); }
   onModuleInit() {
     void this.check().catch(() => {});
@@ -18,7 +19,12 @@ export class ProviderHealthService implements OnModuleInit, OnModuleDestroy {
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
   check() {
     if (this.pending) return this.pending;
-    this.pending = this.run().finally(() => { this.pending = undefined; });
+    this.pending = this.run().then(async state => {
+      if(state && ['HEALTHY','LOW_BALANCE'].includes(state.status)) {
+        try {await this.notifications.observeLowBalance(String(state.balance),state.currency);}catch{}
+      }
+      return state;
+    }).finally(() => { this.pending = undefined; });
     return this.pending;
   }
   private async run() {

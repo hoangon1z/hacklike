@@ -71,17 +71,31 @@ export class BinanceService {
     }
     throw new Error('TRONSCAN_HISTORY_PAGE_LIMIT');
   }
-  private async applyDeposit(remote:BinanceDeposit){
+  private async queueConfirmedDeposit(tx:Prisma.TransactionClient,request:{id:string;publicId:string;userId:string;requestedVnd:Prisma.Decimal;usdtRate:Prisma.Decimal|null},remote:BinanceDeposit){
+    const user=await tx.user.findUnique({where:{id:request.userId},select:{displayName:true}});
+    const money=(value:Prisma.Decimal|string)=>new Intl.NumberFormat('vi-VN',{maximumFractionDigits:2}).format(Number(value))+' ₫';
+    await tx.outboxEvent.createMany({data:[{id:'telegram-usdt-'+request.id,aggregateType:'DEPOSIT',aggregateId:request.id,eventType:'TELEGRAM_ADMIN_ALERT',payload:{text:'✅ Nạp USDT thành công — Binance đã nhận tiền\nMã nạp: '+request.publicId+'\nKhách: '+(user?.displayName??request.userId)+'\nSố nhận: '+remote.amount+' USDT\nMạng: '+remote.network+'\nĐã cộng ví: '+money(request.requestedVnd)+'\nTỷ giá lúc tạo yêu cầu: '+(request.usdtRate?money(request.usdtRate):'Không có')+' / USDT\nTxID: '+remote.txId}}],skipDuplicates:true});
+  }
+  private async applyDeposit(remote:BinanceDeposit,confirmedByBinance=false,alertSince=0){
     const identity=depositIdentity(remote);
     if(!identity)return false;
     const {network,address,amount,receivedAt}=identity;
+    const shouldNotify=confirmedByBinance&&remote.insertTime>=alertSince;
     try{
       return await this.prisma.$transaction(async tx=>{
         // Serialize matching and crediting across worker instances.
         const lockKey=`binance:${network}:${address}:${amount.toFixed()}`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
         const duplicate=await tx.paymentTransaction.findFirst({where:{OR:[{provider:'BINANCE',externalId:remote.id},{network,txHash:remote.txId,logIndex:0}]}});
-        if(duplicate)return false;
+        if(duplicate){
+          // A previous blockchain fallback may have credited the request. Notify only now,
+          // when Binance itself confirms the same deposit, without crediting it again.
+          if(shouldNotify&&duplicate.depositRequestId){
+            const request=await tx.depositRequest.findUnique({where:{id:duplicate.depositRequestId}});
+            if(request?.status==='COMPLETED')await this.queueConfirmedDeposit(tx,request,remote);
+          }
+          return false;
+        }
         const candidates=await tx.depositRequest.findMany({where:{
           method:network==='TRX'?'USDT_TRC20':'USDT_BEP20',
           network,
@@ -108,6 +122,7 @@ export class BinanceService {
         // Idempotency belongs to the request, not only the remote transaction.
         await this.wallets.deposit(tx,request.userId,request.requestedVnd,request.id,`deposit:binance:request:${request.id}`,'Nạp USDT tự động');
         await tx.depositRequest.update({where:{id:request.id},data:{status:'COMPLETED',creditedVnd:request.requestedVnd}});
+        if(shouldNotify)await this.queueConfirmedDeposit(tx,request,remote);
         return true;
       },{timeout:15000});
     }catch(error){
@@ -118,15 +133,21 @@ export class BinanceService {
   }
   async reconcile(){
     if(!this.configured())return {checked:0,credited:0};
+    // Persist a cutover so deploying alerts does not replay 89 days of old deposits.
+    const activation=await this.prisma.systemSetting.upsert({where:{key:'TELEGRAM_USDT_ALERT_STARTED_AT'},create:{key:'TELEGRAM_USDT_ALERT_STARTED_AT',value:new Date().toISOString(),isPublic:false},update:{}});
+    const alertSince=Date.parse(String(activation.value));
+    if(!Number.isFinite(alertSince))throw new Error('INVALID_USDT_ALERT_ACTIVATION');
     let deposits:BinanceDeposit[];
+    let confirmedByBinance=true;
     try{deposits=await this.history();}
     catch(error){
       const code=error instanceof Error?error.message:'';
       if(!['BINANCE_TIME_UNAVAILABLE','BINANCE_HTTP_451'].includes(code))throw error;
       deposits=await this.tronHistory();
+      confirmedByBinance=false;
     }
     let credited=0;
-    for(const remote of deposits)if(await this.applyDeposit(remote))credited++;
+    for(const remote of deposits)if(await this.applyDeposit(remote,confirmedByBinance,alertSince))credited++;
     await this.prisma.depositRequest.updateMany({where:{method:{in:['USDT_TRC20','USDT_BEP20']},status:{in:['CREATED','WAITING','CONFIRMING']},expiresAt:{lt:new Date()}},data:{status:'EXPIRED'}});
     return {checked:deposits.length,credited};
   }

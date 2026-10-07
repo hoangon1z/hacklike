@@ -46,6 +46,15 @@ PostgreSQL và Redis không mở cổng công khai trong compose production. Hã
 
 ### Bài đăng có định dạng và ảnh
 
+### Telegram vận hành
+
+- Cấu hình `TELEGRAM_BOT_TOKEN` và `TELEGRAM_ADMIN_CHAT_ID` trong môi trường server (không commit token). Bot gửi cảnh báo dưới 100.000 ₫ và phục hồi sau khi số dư đạt lại ngưỡng; kiểm tra chủ động mỗi 3 phút, quy đổi USD theo tỷ giá nhà cung cấp nếu cần. Đây là ngưỡng Telegram riêng, không đổi ngưỡng trạng thái nhà cung cấp trong admin.
+- Báo khi có đơn chờ tiền web cha và khi đơn cần đối soát thủ công. Không gửi cảnh báo mới cho mọi vòng retry của cùng sự cố/đơn.
+- USDT chỉ báo thành công sau xác nhận trực tiếp Binance (status 1, travel rule đã xong) và giao dịch cộng ví hoàn tất; thông báo dùng tỷ giá/tiền VND đã chốt của yêu cầu nạp. Xác nhận blockchain dự phòng không đủ điều kiện thông báo. Không phát lại các khoản nhận trước lúc kích hoạt tính năng.
+- Thông báo đi qua outbox có khóa và chống tạo trùng; Telegram lỗi được thử lại giãn cách, không rollback giao dịch đã cộng tiền. Telegram không hỗ trợ khóa idempotency: timeout sau khi Telegram nhận tin vẫn có thể khiến tin nhắn lặp khi retry, nhưng không cộng tiền/gửi đơn lần hai.
+
+### Lưu trữ ảnh bài đăng
+
 - Admin có thể định dạng nội dung qua thanh công cụ Markdown và xem trước; Home dùng cùng bộ hiển thị, không thực thi HTML/script trong bài đăng.
 - Upload JPG/PNG/WebP tối đa 5 MB, ảnh được kiểm tra bằng bộ giải mã và chuyển sang WebP (tối đa 1600 px). Chỉ ADMIN/SUPER_ADMIN được upload.
 - Production lưu ảnh trong volume `announcement_uploads` ở `/app/uploads`; backup volume này cùng database. Không dùng `down -v`. Local lưu trong `uploads/announcements` (có thể đổi qua `ANNOUNCEMENT_UPLOAD_DIR`).
