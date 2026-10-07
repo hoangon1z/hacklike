@@ -16,4 +16,5 @@ legacy-import-backup*.sql
 .git
 *.log
 coverage
+uploads
 ui-login-check.png

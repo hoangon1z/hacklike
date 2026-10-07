@@ -43,3 +43,10 @@ PostgreSQL và Redis không mở cổng công khai trong compose production. Hã
 - AWS Security Group cho phép TCP 443; DNS Cloudflare bật Proxied. Sau khi origin TLS hoạt động, bật Full (strict) và Always Use HTTPS. Không dùng Flexible.
 - Origin CA không được trình duyệt tin cậy khi truy cập trực tiếp origin. Chứng chỉ cần được thay trước khi hết hạn; không tự gia hạn bằng cấu hình này.
 - Mọi lệnh cập nhật production HTTPS phải dùng cả hai file Compose; không chạy `down -v` vì sẽ xóa dữ liệu database.
+
+### Bài đăng có định dạng và ảnh
+
+- Admin có thể định dạng nội dung qua thanh công cụ Markdown và xem trước; Home dùng cùng bộ hiển thị, không thực thi HTML/script trong bài đăng.
+- Upload JPG/PNG/WebP tối đa 5 MB, ảnh được kiểm tra bằng bộ giải mã và chuyển sang WebP (tối đa 1600 px). Chỉ ADMIN/SUPER_ADMIN được upload.
+- Production lưu ảnh trong volume `announcement_uploads` ở `/app/uploads`; backup volume này cùng database. Không dùng `down -v`. Local lưu trong `uploads/announcements` (có thể đổi qua `ANNOUNCEMENT_UPLOAD_DIR`).
+- Ảnh bài đăng được phục vụ bằng URL công khai, không upload tài liệu nhạy cảm. Ảnh đã upload nhưng chưa lưu bài vẫn còn trong volume; hiện không tự động xóa ảnh.

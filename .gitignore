@@ -22,4 +22,5 @@ legacy-import-backup*.sql
 .idea
 .vscode
 coverage
+uploads/
 .DS_Store

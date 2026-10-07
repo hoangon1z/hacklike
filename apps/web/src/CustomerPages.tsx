@@ -1,4 +1,6 @@
 import {formatVND} from './utils/formatVND';
+import { AnnouncementContent } from './AnnouncementContent';
+import { AnnouncementEditor } from './AnnouncementEditor';
 import { FormEvent, useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { api, ApiError, SessionUser } from './api';
@@ -251,7 +253,7 @@ export function DashboardHome() {
                     </span>
                   </div>
                   <h3 className="smm-dash-post-title">{post.title}</h3>
-                  <p className="smm-dash-post-content">{post.content}</p>
+                  <AnnouncementContent content={post.content}/>
                 </article>
               ))
             ) : (
@@ -806,11 +808,4 @@ export function NotificationsPage() {
     </section>
   </div>;
 }
-export function AdminAnnouncements(){
-  const [posts,setPosts]=useState<Post[]>([]),[id,setId]=useState(''),[title,setTitle]=useState(''),[content,setContent]=useState(''),[kind,setKind]=useState('NEWS'),[published,setPublished]=useState(false),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
-  const load=()=>api<Post[]>('/admin/announcements').then(setPosts);
-  useEffect(()=>{load().catch(()=>setMessage('Chưa thể tải bài đăng.'));},[]);
-  function reset(){setId('');setTitle('');setContent('');setKind('NEWS');setPublished(false);}
-  async function save(e:FormEvent){e.preventDefault();setBusy(true);try{await api(`/admin/announcements${id?`/${id}`:''}`,{method:id?'PATCH':'POST',body:JSON.stringify({title,content,kind,published})});reset();await load();setMessage('Đã lưu bài đăng.');}catch{setMessage('Chưa thể lưu bài đăng. Vui lòng thử lại.');}finally{setBusy(false);}}
-  return <div className="page customer-page"><div className="page-head"><div><h1>Bảng tin & khuyến mãi</h1><p>Bài đã xuất bản hiển thị trên dashboard khách hàng.</p></div></div>{message&&<div className="notice" role="status">{message}</div>}<div className="customer-home-grid"><form className="card customer-form" onSubmit={save}><h2>{id?'Chỉnh sửa bài đăng':'Tạo bài đăng'}</h2><label htmlFor="post-title">Tiêu đề</label><input id="post-title" className="input" value={title} required maxLength={160} onChange={e=>setTitle(e.target.value)}/><label htmlFor="post-kind">Loại bài</label><select id="post-kind" className="input" value={kind} onChange={e=>setKind(e.target.value)}><option value="NEWS">Bảng tin</option><option value="PROMOTION">Khuyến mãi</option><option value="NOTICE">Thông báo</option></select><label htmlFor="post-content">Nội dung</label><textarea id="post-content" className="input" rows={10} value={content} required maxLength={20000} onChange={e=>setContent(e.target.value)}/><label><input type="checkbox" checked={published} onChange={e=>setPublished(e.target.checked)}/> Xuất bản trên website</label><div className="customer-actions"><button className="primary" disabled={busy}>Lưu bài đăng</button>{id&&<button type="button" className="secondary" onClick={reset}>Hủy chỉnh sửa</button>}</div></form><section className="card"><h2>Bài đã tạo</h2>{!posts.length&&<p>Chưa có bài đăng.</p>}{posts.map(p=><article className="bulletin-post" key={p.id}><small>{p.published?'Đã xuất bản':'Bản nháp'}</small><h3>{p.title}</h3><button className="secondary" onClick={()=>{setId(p.id);setTitle(p.title);setContent(p.content);setKind(p.kind);setPublished(p.published);}}>Chỉnh sửa</button></article>)}</section></div></div>;
-}
+export function AdminAnnouncements(){ return <AnnouncementEditor/>; }

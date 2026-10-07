@@ -69,7 +69,9 @@ services:
       NODE_ENV: production
       PORT: 4000
       SMM_PROVIDER_TRANSPORT_URL: http://provider-transport:8192/v1
+      ANNOUNCEMENT_UPLOAD_DIR: /app/uploads/announcements
       SMM_TRANSPORT_TOKEN: ${SMM_TRANSPORT_TOKEN:?Set SMM_TRANSPORT_TOKEN in .env.production}
+    volumes: [announcement_uploads:/app/uploads]
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -94,3 +96,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  announcement_uploads:

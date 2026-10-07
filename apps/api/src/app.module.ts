@@ -15,6 +15,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { validateEnv } from './config/validate-env';
 import { AccountController, AnnouncementsController } from './account.controller';
+import { AnnouncementImagesController } from './announcement-images.controller';
 import { AdminAuditInterceptor } from './admin/admin-audit.interceptor';
 
 @Module({
@@ -24,7 +25,7 @@ import { AdminAuditInterceptor } from './admin/admin-audit.interceptor';
     BullModule.forRootAsync({ inject: [ConfigService], useFactory: (config: ConfigService) => ({ connection: { url: config.get('REDIS_URL', 'redis://localhost:6379') } }) }),
     PrismaModule, AuthModule, ProviderModule, ServicesModule, WalletsModule, OrdersModule, AdminModule, PaymentsModule, OutboxModule,
   ],
-  controllers: [HealthController, AccountController, AnnouncementsController],
+  controllers: [HealthController, AccountController, AnnouncementsController, AnnouncementImagesController],
   providers:[{provide:APP_GUARD,useClass:ThrottlerGuard},{provide:APP_INTERCEPTOR,useClass:AdminAuditInterceptor}],
 })
 export class AppModule {}

@@ -21,6 +21,7 @@ COPY --from=build /app/apps/api/prisma ./apps/api/prisma
 COPY --from=build /app/apps/api/scripts ./apps/api/scripts
 COPY --from=build /app/packages/contracts/package.json ./packages/contracts/package.json
 COPY --from=build /app/packages/contracts/dist ./packages/contracts/dist
+RUN mkdir -p /app/uploads/announcements && chown -R node:node /app/uploads
 USER node
 EXPOSE 4000
 CMD ["sh","-c","npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && node apps/api/dist/main.js"]
