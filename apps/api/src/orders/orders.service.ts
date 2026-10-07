@@ -1,6 +1,6 @@
 import { ConflictException, Injectable } from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bullmq";
-import { Prisma } from "@prisma/client";
+import { Prisma, OrderStatus } from "@prisma/client";
 import { Queue } from "bullmq";
 import { randomUUID } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
@@ -144,12 +144,69 @@ export class OrdersService {
       },
     });
   }
-  list(userId: string, group?: string) {
+  async list(
+    userId: string,
+    group?: string,
+    query?: { search?: string; status?: string; page?: number; limit?: number },
+  ) {
+    const statusFilter =
+      query?.status && query.status !== "ALL" && Object.values(OrderStatus).includes(query.status as OrderStatus)
+        ? (query.status as OrderStatus)
+        : undefined;
+
+    const trimmedSearch = query?.search?.trim();
+
+    const where: Prisma.OrderWhereInput = {
+      userId,
+      ...(group ? { service: { category: { name: group } } } : {}),
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(trimmedSearch
+        ? {
+            OR: [
+              { publicId: { contains: trimmedSearch, mode: "insensitive" } },
+              { link: { contains: trimmedSearch, mode: "insensitive" } },
+              { comments: { contains: trimmedSearch, mode: "insensitive" } },
+              { service: { displayName: { contains: trimmedSearch, mode: "insensitive" } } },
+            ],
+          }
+        : {}),
+    };
+
+    if (query?.page !== undefined || query?.limit !== undefined) {
+      const page = Math.max(1, Number(query?.page) || 1);
+      const limit = Math.min(100, Math.max(1, Number(query?.limit) || 10));
+      const [items, total] = await this.prisma.$transaction([
+        this.prisma.order.findMany({
+          where,
+          include: {
+            service: {
+              select: {
+                displayName: true,
+                providerServiceId: true,
+                providerName: true,
+                category: { select: { name: true } },
+              },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        this.prisma.order.count({ where }),
+      ]);
+      return { items, total, page, pageSize: limit };
+    }
+
     return this.prisma.order.findMany({
-      where: { userId, ...(group ? { service: { category: { name: group } } } : {}) },
+      where,
       include: {
         service: {
-          select: { displayName: true, category: { select: { name: true } } },
+          select: {
+            displayName: true,
+            providerServiceId: true,
+            providerName: true,
+            category: { select: { name: true } },
+          },
         },
       },
       orderBy: { createdAt: "desc" },

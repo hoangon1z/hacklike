@@ -3,7 +3,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { api, ApiError, SessionUser } from './api';
 import './customer-design.css';
-import { ArrowDownLeft, ArrowUpRight, Bell, BookOpen, CheckCircle2, ChevronRight, CircleDollarSign, ClipboardList, CreditCard, Headphones, Mail, Megaphone, Plus, Send, Settings2, ShieldCheck, Sparkles, Tag, TrendingUp, UserRound, Wallet } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Bell, BookOpen, Calendar, Check, CheckCircle2, ChevronRight, CircleDollarSign, ClipboardList, Clock, CreditCard, Eye, EyeOff, Headphones, Lock, Mail, Megaphone, Plus, Send, Settings2, ShieldAlert, ShieldCheck, Sparkles, Tag, TrendingUp, UserRound, Wallet } from 'lucide-react';
 
 type Post={id:string;title:string;content:string;kind:string;published:boolean;createdAt:string};
 type Notification={id:string;title:string;content:string;status?:string;createdAt:string;href:string;read:boolean};
@@ -55,59 +55,733 @@ export function DashboardHome() {
   const [data, setData] = useState<Summary | null>(null);
   const [user, setUser] = useState<SessionUser | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [channels, setChannels] = useState<{ telegram: string | null; fanpage: string | null } | null>(null);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
+
   useEffect(() => {
     let active = true;
-    const load = () => Promise.all([api<Summary>('/account/dashboard'), api<SessionUser>('/auth/me'), api<Notification[]>('/account/notifications')])
-      .then(([d, u, n]) => { if (active) { setData(d); setUser(u); setNotifications(n); setError(''); } })
-      .catch(() => { if (active) setError('Chưa thể tải thông tin tài khoản.'); });
-    load(); window.addEventListener("wallet-updated", load); const timer = setInterval(load, 30000);
-    return () => { active = false; clearInterval(timer); window.removeEventListener("wallet-updated", load); };
+    const load = () =>
+      Promise.all([
+        api<Summary>('/account/dashboard'),
+        api<SessionUser>('/auth/me'),
+        api<Notification[]>('/account/notifications'),
+      ])
+        .then(([d, u, n]) => {
+          if (active) {
+            setData(d);
+            setUser(u);
+            setNotifications(n);
+            setError('');
+          }
+        })
+        .catch(() => {
+          if (active) setError('Chưa thể tải thông tin tài khoản.');
+        });
+
+    load();
+    api<{ telegram: string | null; fanpage: string | null }>('/health/capabilities')
+      .then(value => {
+        if (active) setChannels(value);
+      })
+      .catch(() => null);
+
+    window.addEventListener('wallet-updated', load);
+    const timer = window.setInterval(load, 30000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener('wallet-updated', load);
+    };
   }, [retry]);
-  if (!data || !user) return <div className="page customer-page home-dashboard">{error ? <div className="card dashboard-load-error"><Bell/><h2>{error}</h2><button className="secondary" onClick={() => setRetry(value => value + 1)}>Thử lại</button></div> : <div className="dashboard-skeleton" role="status" aria-label="Đang tải tổng quan"><div/><div/><div/><div/></div>}</div>;
-  const initials = user.displayName.trim().split(/\s+/).slice(-2).map(value => value[0]).join('').toUpperCase();
-  const unread = notifications.filter(n => !n.read).length;
-  const actions = [
-    { href: '/order', title: 'Tạo đơn mới', detail: 'Chọn dịch vụ phù hợp', Icon: Plus, tone: 'blue' },
-    { href: '/deposit', title: 'Nạp tiền', detail: 'Bổ sung số dư tài khoản', Icon: CreditCard, tone: 'green' },
-    { href: '/pricing', title: 'Bảng giá', detail: 'Xem giá các dịch vụ', Icon: BookOpen, tone: 'orange' },
-    { href: '/profile', title: 'Hồ sơ', detail: 'Thông tin & bảo mật', Icon: Settings2, tone: 'purple' },
-  ];
-  return <div className="page customer-page home-dashboard">
-    <div className="page-head dashboard-heading"><div><span className="section-kicker">KHÔNG GIAN LÀM VIỆC CỦA BẠN</span><h1>Xin chào, {user.displayName} <span className="hello-spark"><Sparkles size={21}/></span></h1><p>Mọi hoạt động, tài khoản và cập nhật trong một nơi.</p></div><div className="dashboard-date">{new Intl.DateTimeFormat('vi-VN', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date())}</div></div>
-    {error && <div className="form-error" role="alert">{error} <button onClick={() => setRetry(value => value + 1)}>Thử lại</button></div>}
-    <div className="dashboard-account-row">
-      <section className="card identity-card"><div className="identity-top"><span className="identity-avatar">{initials}<i/></span><NavLink to="/profile" className="identity-edit" aria-label="Chỉnh sửa hồ sơ"><ArrowUpRight size={19}/></NavLink></div><span className="section-kicker">THÔNG TIN TÀI KHOẢN</span><h2>{user.displayName}</h2><p className="identity-email"><Mail size={14}/>{user.email}</p><div className="identity-bottom"><span><ShieldCheck size={14}/>{user.status === 'ACTIVE' ? 'Tài khoản hoạt động' : 'Tài khoản chưa hoạt động'}</span><NavLink to="/profile">Hồ sơ <ChevronRight size={14}/></NavLink></div></section>
-      <section className="wallet-hero"><div className="wallet-hero-heading"><span><Wallet size={19}/> Số dư khả dụng</span><span className="wallet-currency">VND</span></div><strong>{formatVND(Number(user.wallet?.balance ?? 0) - Number(user.wallet?.reserved ?? 0))}</strong><div className="wallet-hero-bottom"><small>Đang giữ cho đơn hàng<br/><b>{formatVND(Number(user.wallet?.reserved ?? 0))}</b></small><NavLink to="/deposit"><Plus size={16}/> Nạp tiền</NavLink></div></section>
-      <section className="card deposit-summary"><span className="summary-icon"><CircleDollarSign size={23}/></span><span className="section-kicker">TỔNG NẠP THÀNH CÔNG</span><strong>{formatVND(data.totalDeposited)}</strong><p>{data.historicalDeposited?'Bao gồm tổng nạp đã chuyển từ website cũ.':'Tổng tiền đã được cộng vào ví của bạn.'}</p><NavLink to="/deposit">Quản lý nạp tiền <ArrowUpRight size={15}/></NavLink></section>
-    </div>
-    <section className="dashboard-quick-actions">{actions.map(({href,title,detail,Icon,tone}) => <NavLink key={href} to={href}><span className={`quick-action-icon ${tone}`}><Icon size={21}/></span><span><b>{title}</b><small>{detail}</small></span><ChevronRight size={17}/></NavLink>)}</section>
-    <div className="dashboard-content-grid">
-      <div className="dashboard-primary">
-        <section className="dashboard-metrics">
-          <article><span className="metric-symbol blue"><TrendingUp size={19}/></span><div><span>Tổng chi tiêu</span><strong>{formatVND(data.totalSpent)}</strong><small>Toàn thời gian · đã trừ hoàn tiền</small></div></article>
-          <article><span className="metric-symbol purple"><ClipboardList size={19}/></span><div><span>Đơn tạo mới</span><strong>{data.newOrders.toLocaleString('vi-VN')} <small>đơn</small></strong><small>Trong 30 ngày gần nhất</small></div></article>
-          <article><span className="metric-symbol orange"><CircleDollarSign size={19}/></span><div><span>Giá trị trung bình</span><strong>{formatVND(data.averageOrder)}</strong><small>Mỗi đơn đã thanh toán</small></div></article>
-        </section>
-        <SpendingChart daily={data.daily}/>
-        <section className="card news-panel"><div className="section-heading"><div><span className="section-kicker">CẬP NHẬT TỪ Hacklike43</span><h2>Bảng tin & khuyến mãi</h2></div><span className="subtle-icon"><Megaphone size={20}/></span></div>
-          {data.posts.length ? <div className="news-list">{data.posts.map(p => <article className={`news-entry ${p.kind === 'PROMOTION' ? 'promotion' : ''}`} key={p.id}><span className="news-entry-icon">{p.kind === 'PROMOTION' ? <Tag size={20}/> : <Megaphone size={20}/>}</span><div className="news-entry-body"><div className="news-meta"><span className="news-kind">{p.kind === 'PROMOTION' ? 'Khuyến mãi' : p.kind === 'NOTICE' ? 'Thông báo' : 'Bảng tin'}</span><time>{new Date(p.createdAt).toLocaleDateString('vi-VN')}</time></div><h3>{p.title}</h3><p>{p.content}</p></div></article>)}</div> : <div className="designed-empty"><span><Megaphone size={25}/></span><b>Chưa có cập nhật mới</b><p>Tin tức và ưu đãi mới sẽ xuất hiện tại đây khi được đăng.</p></div>}
-        </section>
+
+  // Loading & Error States
+  if (!data || !user) {
+    return (
+      <div className="page customer-page home-dashboard">
+        {error ? (
+          <div className="card dashboard-load-error" role="alert">
+            <Bell />
+            <h2>{error}</h2>
+            <button className="secondary" onClick={() => setRetry(v => v + 1)}>
+              Thử lại
+            </button>
+          </div>
+        ) : (
+          <div className="smm-dash-container" role="status" aria-label="Đang tải tổng quan">
+            <div className="smm-dash-left">
+              <div className="smm-dash-account-card">
+                <div className="smm-dash-account-top">
+                  <div className="smm-dash-skeleton-avatar" />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+                    <div className="smm-skeleton-line tall" style={{ width: 180 }} />
+                    <div className="smm-skeleton-line medium" />
+                  </div>
+                </div>
+                <hr className="smm-dash-divider" />
+                <div className="smm-dash-metrics">
+                  <div className="smm-dash-skeleton-metric" />
+                  <div className="smm-dash-skeleton-metric" />
+                  <div className="smm-dash-skeleton-metric" />
+                </div>
+              </div>
+              <div className="smm-dash-post-card" style={{ minHeight: 240 }} />
+            </div>
+            <div className="smm-dash-right">
+              <div className="smm-dash-card" style={{ minHeight: 220 }} />
+              <div className="smm-dash-card" style={{ minHeight: 140 }} />
+              <div className="smm-dash-card" style={{ minHeight: 180 }} />
+            </div>
+          </div>
+        )}
       </div>
-      <aside className="dashboard-secondary"><section className="card activity-panel"><div className="section-heading"><h2>Thông báo <span className="count-pill">{unread}</span></h2><NavLink to="/notifications" aria-label="Xem tất cả thông báo"><ArrowUpRight size={18}/></NavLink></div>
-        {notifications.length ? <div className="activity-list">{notifications.slice(0,4).map(n => <NavLink to={n.href} className={`activity-item ${!n.read ? 'unread' : ''}`} key={n.id}><NotificationIcon item={n}/><div><b>{n.title}{!n.read && <span className="unread-dot"/>}</b><p>{n.status ? statuses[n.status] ?? 'Đang xử lý' : n.content.slice(0,110)}</p><time>{new Date(n.createdAt).toLocaleString('vi-VN', { day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit' })}</time></div></NavLink>)}</div> : <div className="designed-empty compact"><span><Bell size={24}/></span><b>Bạn đã xem hết thông báo</b><p>Cập nhật đơn hàng và giao dịch sẽ hiển thị tại đây.</p></div>}
-        <NavLink className="activity-footer" to="/notifications">Xem tất cả thông báo <ChevronRight size={15}/></NavLink></section><SupportChannels/>
-      </aside>
+    );
+  }
+
+  const initials = user.displayName
+    .trim()
+    .split(/\s+/)
+    .slice(-2)
+    .map(v => v[0])
+    .join('')
+    .toUpperCase();
+  const role = { CUSTOMER: 'Thành viên', ADMIN: 'Quản trị viên', SUPER_ADMIN: 'Quản trị hệ thống' }[user.role] ?? 'Thành viên';
+  const isVerified = user.status === 'ACTIVE';
+  const safe = (url: string | null | undefined) => (url && /^https:\/\//i.test(url) ? url : null);
+  const activity = notifications.filter(n => !n.id.startsWith('post:'));
+  const balance = user.wallet ? Number(user.wallet.balance) - Number(user.wallet.reserved) : 0;
+
+  return (
+    <div className="page customer-page home-dashboard">
+      {error && (
+        <div className="form-error" role="alert">
+          {error}
+          <button className="secondary" onClick={() => setRetry(v => v + 1)}>
+            Thử lại
+          </button>
+        </div>
+      )}
+
+      <div className="smm-dash-container">
+        {/* LEFT COLUMN: ~71% */}
+        <div className="smm-dash-left">
+          {/* Top Account Overview Card */}
+          <section className="smm-dash-account-card">
+            <div className="smm-dash-account-top">
+              <div className="smm-dash-avatar" aria-hidden="true">
+                {initials}
+              </div>
+              <div className="smm-dash-user-info">
+                <div className="smm-dash-user-row">
+                  <h1 className="smm-dash-username">{user.displayName}</h1>
+                  {isVerified && (
+                    <span className="smm-dash-verified-badge" title="Tài khoản đã kích hoạt">
+                      <Check size={11} strokeWidth={3.5} />
+                    </span>
+                  )}
+                </div>
+                <div className="smm-dash-user-sub">
+                  <span className="smm-dash-meta-item">
+                    <Mail size={13} />
+                    <span>{user.email}</span>
+                  </span>
+                  <span className="smm-dash-meta-item smm-dash-role-badge">
+                    <UserRound size={13} />
+                    <span>{role}</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <hr className="smm-dash-divider" />
+
+            <div className="smm-dash-metrics">
+              <div className="smm-dash-metric">
+                <div className="smm-dash-metric-icon balance">
+                  <Wallet size={21} />
+                </div>
+                <div className="smm-dash-metric-content">
+                  <span className="smm-dash-metric-label">Số Dư</span>
+                  <strong className="smm-dash-metric-value">{formatVND(balance)}</strong>
+                </div>
+              </div>
+
+              <div className="smm-dash-metric">
+                <div className="smm-dash-metric-icon deposit">
+                  <CreditCard size={21} />
+                </div>
+                <div className="smm-dash-metric-content">
+                  <span className="smm-dash-metric-label">Tổng nạp</span>
+                  <strong className="smm-dash-metric-value">{formatVND(data.totalDeposited)}</strong>
+                </div>
+              </div>
+
+              <div className="smm-dash-metric">
+                <div className="smm-dash-metric-icon tier">
+                  <ShieldCheck size={21} />
+                </div>
+                <div className="smm-dash-metric-content">
+                  <span className="smm-dash-metric-label">Cấp bậc</span>
+                  <strong className="smm-dash-metric-value">{role}</strong>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Main Announcement / Admin Post Card */}
+          <section className="smm-dash-post-card">
+            {data.posts.length > 0 ? (
+              data.posts.map(post => (
+                <article className="smm-dash-post-item" key={post.id}>
+                  <div className="smm-dash-post-header">
+                    <div className="smm-dash-post-avatar">
+                      <ShieldCheck size={20} />
+                    </div>
+                    <div className="smm-dash-post-meta">
+                      <span className="smm-dash-post-author">
+                        Quản Trị Viên <span title="Ghim">📌</span>
+                      </span>
+                      <time className="smm-dash-post-date" dateTime={post.createdAt}>
+                        {new Date(post.createdAt).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })} lúc{' '}
+                        {new Date(post.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                      </time>
+                    </div>
+                    <span className="smm-dash-post-tag">
+                      {post.kind === 'PROMOTION' ? 'Khuyến mãi' : post.kind === 'NOTICE' ? 'Thông báo' : 'Bảng tin'}
+                    </span>
+                  </div>
+                  <h3 className="smm-dash-post-title">{post.title}</h3>
+                  <p className="smm-dash-post-content">{post.content}</p>
+                </article>
+              ))
+            ) : (
+              <div className="smm-dash-empty-post">
+                <div className="smm-dash-empty-icon">
+                  <Megaphone size={26} />
+                </div>
+                <p className="smm-dash-empty-title">Chưa có thông báo mới.</p>
+                <p className="smm-dash-empty-desc">
+                  Các thông báo và cập nhật chính thức từ ban quản trị sẽ xuất hiện tại đây.
+                </p>
+              </div>
+            )}
+          </section>
+        </div>
+
+        {/* RIGHT COLUMN: ~29% */}
+        <aside className="smm-dash-right">
+          {/* Recent Activity Card */}
+          <section className="smm-dash-card">
+            <div className="smm-dash-card-header">
+              <h2 className="smm-dash-card-title">
+                <Bell size={17} />
+                <span>Hoạt động mới</span>
+              </h2>
+            </div>
+            {activity.length > 0 ? (
+              <div className="smm-dash-activity-list">
+                {activity.map(n => {
+                  const d = new Date(n.createdAt);
+                  const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+                  return (
+                    <NavLink to={n.href} key={n.id} className="smm-dash-activity-row">
+                      <span className="smm-dash-activity-date">{dateStr}</span>
+                      <span className="smm-dash-activity-desc">
+                        {n.status
+                          ? `${n.title} - ${statuses[n.status] ?? 'Đang xử lý'}`
+                          : n.content.replace(/ VND\b/g, ' ₫')}
+                      </span>
+                    </NavLink>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="smm-dash-activity-empty">
+                <Bell size={22} />
+                <span>Chưa có hoạt động mới</span>
+              </div>
+            )}
+            <div className="smm-dash-btn-center">
+              <NavLink to="/notifications" className="smm-dash-all-activity-btn">
+                Xem tất cả thông báo
+              </NavLink>
+            </div>
+          </section>
+
+          {/* Support Channels Card */}
+          <section className="smm-dash-card">
+            <div className="smm-dash-card-header">
+              <h2 className="smm-dash-card-title">
+                <Headphones size={17} />
+                <span>Bạn cần hỗ trợ?</span>
+              </h2>
+            </div>
+            <div className="smm-dash-support-grid">
+              {safe(channels?.fanpage) && (
+                <a
+                  href={channels!.fanpage!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="smm-dash-support-item"
+                >
+                  <span className="smm-dash-support-icon facebook">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                    </svg>
+                  </span>
+                  <span>Fanpage Hỗ trợ</span>
+                </a>
+              )}
+              {safe(channels?.telegram) && (
+                <a
+                  href={channels!.telegram!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="smm-dash-support-item"
+                >
+                  <span className="smm-dash-support-icon telegram">
+                    <Send size={18} />
+                  </span>
+                  <span>Liên Kết Telegram</span>
+                </a>
+              )}
+              <NavLink to="/deposit" className="smm-dash-support-item">
+                <span className="smm-dash-support-icon deposit">
+                  <CreditCard size={18} />
+                </span>
+                <span>Nạp Tiền</span>
+              </NavLink>
+              <NavLink to="/support" className="smm-dash-support-item">
+                <span className="smm-dash-support-icon help">
+                  <Headphones size={18} />
+                </span>
+                <span>Trung tâm hỗ trợ</span>
+              </NavLink>
+            </div>
+          </section>
+
+          {/* FAQ Accordion Card */}
+          <section className="smm-dash-card">
+            <div className="smm-dash-card-header">
+              <h2 className="smm-dash-card-title">
+                <BookOpen size={17} />
+                <span>Câu hỏi thường gặp (nhấn để xem)</span>
+              </h2>
+            </div>
+            <div className="smm-dash-faq-list">
+              <details className="smm-dash-faq-item">
+                <summary>
+                  <span className="smm-dash-faq-icon">📝</span>
+                  <span>Tôi cần bảo hành?</span>
+                </summary>
+                <p>
+                  Hệ thống hỗ trợ bảo hành theo cam kết của từng dịch vụ. Bạn có thể kiểm tra trạng thái bảo hành trong
+                  mục Lịch sử đơn hàng hoặc liên hệ kênh hỗ trợ kèm mã đơn nếu cần trợ giúp.
+                </p>
+              </details>
+              <details className="smm-dash-faq-item">
+                <summary>
+                  <span className="smm-dash-faq-icon">📝</span>
+                  <span>Tôi nạp tiền nhưng chưa nhận được?</span>
+                </summary>
+                <p>
+                  Hệ thống tự động cộng tiền sau 1–3 phút khi chuyển đúng cú pháp nội dung. Nếu sau 10 phút số dư chưa
+                  cập nhật, vui lòng gửi biên lai chuyển khoản đến kênh hỗ trợ để được kiểm tra ngay.
+                </p>
+              </details>
+              <details className="smm-dash-faq-item">
+                <summary>
+                  <span className="smm-dash-faq-icon">📝</span>
+                  <span>Dịch vụ mua không chạy?</span>
+                </summary>
+                <p>
+                  Mỗi dịch vụ có thời gian bắt đầu khác nhau được ghi rõ ở phần mô tả. Nếu quá thời gian bắt đầu quy định
+                  mà đơn chưa chạy, hệ thống sẽ tự động cập nhật hoặc xử lý hoàn tiền vào số dư tài khoản của bạn.
+                </p>
+              </details>
+              <details className="smm-dash-faq-item">
+                <summary>
+                  <span className="smm-dash-faq-icon">📝</span>
+                  <span>Giá tăng tương tác được tính như thế nào?</span>
+                </summary>
+                <p>
+                  Giá phụ thuộc vào nền tảng và máy chủ dịch vụ. Hệ thống luôn hiển thị đơn giá và tổng chi phí ước tính
+                  theo số lượng trước khi bạn xác nhận tạo đơn.
+                </p>
+              </details>
+            </div>
+          </section>
+        </aside>
+      </div>
     </div>
-  </div>;
+  );
 }
-export function ProfilePage(){
-  const [user,setUser]=useState<SessionUser|null>(null),[name,setName]=useState(''),[current,setCurrent]=useState(''),[password,setPassword]=useState(''),[confirm,setConfirm]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
-  useEffect(()=>{api<SessionUser>('/auth/me').then(u=>{setUser(u);setName(u.displayName);}).catch(()=>setMessage('Chưa thể tải hồ sơ.'));},[]);
-  async function save(e:FormEvent,changePassword=false){e.preventDefault();if(changePassword&&password!==confirm){setMessage('Mật khẩu xác nhận chưa khớp.');return;}setBusy(true);setMessage('');try{await api(changePassword?'/account/password':'/account/profile',{method:'PATCH',body:JSON.stringify(changePassword?{currentPassword:current,newPassword:password}:{displayName:name})});setMessage(changePassword?'Đã đổi mật khẩu. Vui lòng đăng xuất và đăng nhập lại.':'Đã lưu hồ sơ.');if(changePassword){setCurrent('');setPassword('');setConfirm('');}else window.dispatchEvent(new Event('profile-updated'));}catch(e){setMessage(e instanceof ApiError&&e.code==='WRONG_PASSWORD'?'Mật khẩu hiện tại chưa đúng.':'Chưa thể lưu. Kiểm tra thông tin và thử lại.');}finally{setBusy(false);}}
-  return <div className="page customer-page"><div className="page-head"><div><h1>Hồ sơ tài khoản</h1><p>Thông tin cá nhân và bảo mật.</p></div></div>{message&&<div className="notice" role="status">{message}</div>}<div className="customer-home-grid"><form className="card customer-form" onSubmit={e=>save(e)}><h2>Thông tin tài khoản</h2><label htmlFor="profile-email">Email</label><input id="profile-email" className="input" readOnly value={user?.email??''}/><label htmlFor="profile-name">Tên hiển thị</label><input id="profile-name" className="input" required maxLength={80} value={name} onChange={e=>setName(e.target.value)}/><button className="primary" disabled={busy||!user}>Lưu thay đổi</button></form><form className="card customer-form" onSubmit={e=>save(e,true)}><h2>Đổi mật khẩu</h2><label htmlFor="current-password">Mật khẩu hiện tại</label><input id="current-password" className="input" type="password" autoComplete="current-password" required value={current} onChange={e=>setCurrent(e.target.value)}/><label htmlFor="new-password">Mật khẩu mới (ít nhất 12 ký tự)</label><input id="new-password" className="input" type="password" autoComplete="new-password" minLength={12} maxLength={128} required value={password} onChange={e=>setPassword(e.target.value)}/><label htmlFor="confirm-password">Xác nhận mật khẩu</label><input id="confirm-password" className="input" type="password" autoComplete="new-password" required value={confirm} onChange={e=>setConfirm(e.target.value)}/><button className="primary" disabled={busy||!user}>Đổi mật khẩu</button></form></div></div>;
+export function ProfilePage() {
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [name, setName] = useState('');
+  const [profileSuccess, setProfileSuccess] = useState('');
+  const [profileError, setProfileError] = useState('');
+  const [busyProfile, setBusyProfile] = useState(false);
+
+  const [current, setCurrent] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [passwordSuccess, setPasswordSuccess] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [busyPassword, setBusyPassword] = useState(false);
+
+  const loadUser = () => {
+    api<SessionUser>('/auth/me')
+      .then(u => {
+        setUser(u);
+        setName(u.displayName);
+      })
+      .catch(() => setProfileError('Chưa thể tải thông tin hồ sơ.'));
+  };
+
+  useEffect(() => {
+    loadUser();
+  }, []);
+
+  async function handleSaveProfile(e: FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setBusyProfile(true);
+    setProfileError('');
+    setProfileSuccess('');
+    try {
+      await api('/account/profile', {
+        method: 'PATCH',
+        body: JSON.stringify({ displayName: name.trim() }),
+      });
+      setProfileSuccess('Cập nhật thông tin thành công');
+      window.dispatchEvent(new Event('profile-updated'));
+      await loadUser();
+    } catch (err) {
+      setProfileError(
+        err instanceof ApiError && err.code === 'INVALID_PROFILE'
+          ? 'Tên hiển thị không hợp lệ.'
+          : 'Chưa thể lưu thông tin. Vui lòng thử lại.'
+      );
+    } finally {
+      setBusyProfile(false);
+    }
+  }
+
+  async function handleChangePassword(e: FormEvent) {
+    e.preventDefault();
+    if (password !== confirm) {
+      setPasswordError('Mật khẩu xác nhận chưa khớp.');
+      return;
+    }
+    if (password.length < 12) {
+      setPasswordError('Mật khẩu mới phải có ít nhất 12 ký tự.');
+      return;
+    }
+    setBusyPassword(true);
+    setPasswordError('');
+    setPasswordSuccess('');
+    try {
+      await api('/account/password', {
+        method: 'PATCH',
+        body: JSON.stringify({ currentPassword: current, newPassword: password }),
+      });
+      setPasswordSuccess('Đổi mật khẩu thành công. Vui lòng đăng xuất và đăng nhập lại.');
+      setCurrent('');
+      setPassword('');
+      setConfirm('');
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.code === 'WRONG_PASSWORD') {
+          setPasswordError('Mật khẩu hiện tại chưa đúng.');
+        } else if (err.code === 'PASSWORD_TOO_LONG') {
+          setPasswordError('Mật khẩu quá dài (tối đa 72 ký tự).');
+        } else if (err.code === 'PASSWORD_UNCHANGED') {
+          setPasswordError('Mật khẩu mới không được trùng với mật khẩu hiện tại.');
+        } else {
+          setPasswordError('Chưa thể đổi mật khẩu. Vui lòng thử lại.');
+        }
+      } else {
+        setPasswordError('Chưa thể đổi mật khẩu. Vui lòng thử lại.');
+      }
+    } finally {
+      setBusyPassword(false);
+    }
+  }
+
+  const role = user ? ({ CUSTOMER: 'Thành viên', ADMIN: 'Quản trị viên', SUPER_ADMIN: 'Quản trị hệ thống' }[user.role] ?? 'Thành viên') : 'Thành viên';
+  const initials = user
+    ? user.displayName.trim().split(/\s+/).slice(-2).map(part => part[0]).join('').toUpperCase() || 'U'
+    : 'U';
+  const balance = user?.wallet ? Number(user.wallet.balance) - Number(user.wallet.reserved) : 0;
+
+  return (
+    <div className="page customer-page profile-page-wrap">
+      <div className="profile-page-head">
+        <h1 className="profile-title">Hồ sơ tài khoản</h1>
+        <p className="profile-subtitle">Quản lý thông tin cá nhân và bảo mật tài khoản.</p>
+      </div>
+
+      <div className="profile-layout-container">
+        {/* LEFT COLUMN: Profile Identity Card */}
+        <aside className="profile-sidebar-card">
+          <div className="profile-avatar-wrap">
+            <div className="profile-avatar-circle" aria-hidden="true">
+              {initials}
+            </div>
+          </div>
+
+          <div className="profile-identity">
+            <h2 className="profile-card-name">{user?.displayName || '...'}</h2>
+            <div className="profile-card-role-badge">
+              <span className="profile-role-dot" />
+              <span>{role}</span>
+            </div>
+          </div>
+
+          <div className="profile-balance-box">
+            <div className="profile-balance-label">
+              <Wallet size={14} />
+              <span>SỐ DƯ TÀI KHOẢN</span>
+            </div>
+            <div className="profile-balance-amount">
+              {user ? formatVND(balance) : '...'}
+            </div>
+          </div>
+
+          <div className="profile-meta-list">
+            <div className="profile-meta-row">
+              <div className="profile-meta-icon"><Mail size={16} /></div>
+              <div className="profile-meta-content">
+                <span className="profile-meta-label">Email</span>
+                <strong className="profile-meta-value">{user?.email || '...'}</strong>
+              </div>
+            </div>
+
+            <div className="profile-meta-row">
+              <div className="profile-meta-icon"><ShieldCheck size={16} /></div>
+              <div className="profile-meta-content">
+                <span className="profile-meta-label">Cấp bậc</span>
+                <strong className="profile-meta-value">{role}</strong>
+              </div>
+            </div>
+
+            {user?.createdAt && (
+              <div className="profile-meta-row">
+                <div className="profile-meta-icon"><Calendar size={16} /></div>
+                <div className="profile-meta-content">
+                  <span className="profile-meta-label">Thành viên từ</span>
+                  <strong className="profile-meta-value">
+                    {new Date(user.createdAt).toLocaleDateString('vi-VN')}
+                  </strong>
+                </div>
+              </div>
+            )}
+
+            {user?.updatedAt && (
+              <div className="profile-meta-row">
+                <div className="profile-meta-icon"><Clock size={16} /></div>
+                <div className="profile-meta-content">
+                  <span className="profile-meta-label">Cập nhật lần cuối</span>
+                  <strong className="profile-meta-value">
+                    {new Date(user.updatedAt).toLocaleDateString('vi-VN')}
+                  </strong>
+                </div>
+              </div>
+            )}
+          </div>
+        </aside>
+
+        {/* RIGHT COLUMN: Account Information & Security */}
+        <div className="profile-main-forms">
+          {/* Card 1: Thông tin tài khoản */}
+          <section className="profile-card">
+            <div className="profile-card-header">
+              <div className="profile-card-title-row">
+                <div className="profile-header-icon">
+                  <UserRound size={18} />
+                </div>
+                <h2 className="profile-card-title">Thông tin tài khoản</h2>
+              </div>
+              <p className="profile-card-subtext">Cập nhật thông tin hiển thị của tài khoản.</p>
+            </div>
+
+            {profileSuccess && (
+              <div className="profile-banner success" role="status">
+                <CheckCircle2 size={16} />
+                <span>{profileSuccess}</span>
+              </div>
+            )}
+
+            {profileError && (
+              <div className="profile-banner error" role="alert">
+                <ShieldAlert size={16} />
+                <span>{profileError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveProfile} className="profile-form-grid">
+              <div className="profile-field-group">
+                <label htmlFor="profile-name">Tên hiển thị</label>
+                <input
+                  id="profile-name"
+                  className="profile-input"
+                  required
+                  maxLength={80}
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="Nhập tên hiển thị"
+                />
+              </div>
+
+              <div className="profile-field-group">
+                <label htmlFor="profile-email">Email</label>
+                <input
+                  id="profile-email"
+                  className="profile-input readonly"
+                  readOnly
+                  value={user?.email ?? ''}
+                />
+              </div>
+
+              <div className="profile-form-footer">
+                <button
+                  type="submit"
+                  className="profile-action-btn"
+                  disabled={busyProfile || !user || !name.trim() || name === user.displayName}
+                >
+                  {busyProfile ? 'Lưu thay đổi...' : 'Lưu thay đổi'}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          {/* Card 2: Bảo mật & mật khẩu */}
+          <section className="profile-card">
+            <div className="profile-card-header">
+              <div className="profile-card-title-row">
+                <div className="profile-header-icon">
+                  <Lock size={18} />
+                </div>
+                <h2 className="profile-card-title">Bảo mật & mật khẩu</h2>
+              </div>
+              <p className="profile-card-subtext">Thay đổi mật khẩu đăng nhập của bạn.</p>
+            </div>
+
+            <div className="profile-security-tip">
+              <ShieldAlert size={17} />
+              <span>Để bảo vệ tài khoản, hãy sử dụng mật khẩu mạnh và không chia sẻ mật khẩu với người khác.</span>
+            </div>
+
+            {passwordSuccess && (
+              <div className="profile-banner success" role="status">
+                <CheckCircle2 size={16} />
+                <span>{passwordSuccess}</span>
+              </div>
+            )}
+
+            {passwordError && (
+              <div className="profile-banner error" role="alert">
+                <ShieldAlert size={16} />
+                <span>{passwordError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleChangePassword} className="profile-form-grid">
+              <div className="profile-field-group">
+                <label htmlFor="current-password">Mật khẩu hiện tại</label>
+                <div className="profile-password-wrap">
+                  <input
+                    id="current-password"
+                    type={showCurrent ? 'text' : 'password'}
+                    className="profile-input"
+                    autoComplete="current-password"
+                    required
+                    value={current}
+                    onChange={e => setCurrent(e.target.value)}
+                    placeholder="Nhập mật khẩu hiện tại"
+                  />
+                  <button
+                    type="button"
+                    className="profile-password-toggle"
+                    onClick={() => setShowCurrent(!showCurrent)}
+                    aria-label={showCurrent ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                  >
+                    {showCurrent ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="profile-field-group">
+                <label htmlFor="new-password">Mật khẩu mới (ít nhất 12 ký tự)</label>
+                <div className="profile-password-wrap">
+                  <input
+                    id="new-password"
+                    type={showNew ? 'text' : 'password'}
+                    className="profile-input"
+                    autoComplete="new-password"
+                    minLength={12}
+                    maxLength={128}
+                    required
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="Nhập mật khẩu mới"
+                  />
+                  <button
+                    type="button"
+                    className="profile-password-toggle"
+                    onClick={() => setShowNew(!showNew)}
+                    aria-label={showNew ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                  >
+                    {showNew ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="profile-field-group">
+                <label htmlFor="confirm-password">Xác nhận mật khẩu</label>
+                <div className="profile-password-wrap">
+                  <input
+                    id="confirm-password"
+                    type={showConfirm ? 'text' : 'password'}
+                    className="profile-input"
+                    autoComplete="new-password"
+                    required
+                    value={confirm}
+                    onChange={e => setConfirm(e.target.value)}
+                    placeholder="Nhập lại mật khẩu mới"
+                  />
+                  <button
+                    type="button"
+                    className="profile-password-toggle"
+                    onClick={() => setShowConfirm(!showConfirm)}
+                    aria-label={showConfirm ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                  >
+                    {showConfirm ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="profile-form-footer">
+                <button
+                  type="submit"
+                  className="profile-action-btn"
+                  disabled={busyPassword || !current || !password || !confirm}
+                >
+                  {busyPassword ? 'Đang cập nhật...' : 'Đổi mật khẩu'}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
 }
+
 export function NotificationsPage() {
   const [rows, setRows] = useState<Notification[]>([]);
   const [error, setError] = useState('');

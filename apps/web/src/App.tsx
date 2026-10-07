@@ -1,6 +1,16 @@
 import { useDepositMonitor, DepositRecord } from './useDepositMonitor';
 import { depositStatusText, depositNotice } from './depositStatus';
-import {formatVND} from './utils/formatVND';
+import { formatVND, formatUnitNumber } from './utils/formatVND';
+import { AppSidebar } from './components/smm/AppSidebar';
+import { TopNavbar } from './components/smm/TopNavbar';
+import { AccountSummary } from './components/smm/AccountSummary';
+import { ServiceSelector } from './components/smm/ServiceSelector';
+import { ReactionSelector } from './components/smm/ReactionSelector';
+import { HelpVideoCard } from './components/smm/HelpVideoCard';
+import { NoticeCard } from './components/smm/NoticeCard';
+import { FloatContactWidget } from './components/smm/FloatContactWidget';
+import { OrderHistoryTab } from './components/smm/OrderHistoryTab';
+import './smm-panel.css';
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { AdminFinanceOverview } from './AdminFinanceOverview';
 import { LandingPage } from './LandingPage';
@@ -45,7 +55,7 @@ import { RequiredPasswordChange } from './RequiredPasswordChange';
 import { PageLoader } from './PageLoader';
 import { BrandLogo } from './BrandLogo';
 import { OrderSuccessDialog, NotificationDialog } from './OrderSuccessDialog';
-import { REACTIONS, groupReactionServices, serviceReaction } from './serviceReactions';
+import { REACTIONS, groupReactionServices, serviceReaction, ReactionCode } from './serviceReactions';
 import { DashboardHome, ProfilePage, NotificationsPage, AdminAnnouncements } from "./CustomerPages";
 import { QRCodeSVG } from "qrcode.react";
 import { ManagedUsers, ManagedOrders, ManagedPayments, ManagedAudits } from './AdminManagementPages';
@@ -80,10 +90,7 @@ type RealOrder = {
   service: { displayName: string };
   user?: { email: string; displayName: string };
 };
-const unitMoney = (v: number) =>
-  new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 3 }).format(
-    v / 1000,
-  ) + "đ/lượt";
+const unitMoney = (v: number) => formatVND(v / 1000, 3) + '/lượt';
 const servicePlatform = (service: Service) => {
   const text = (service.platform + " " + service.name).toLowerCase();
   if (text.includes("facebook") || text.includes(" fb ")) return "Facebook";
@@ -93,7 +100,7 @@ const servicePlatform = (service: Service) => {
   if (text.includes("telegram")) return "Telegram";
   if (text.includes("twitter") || text.includes(" x ")) return "X";
   if (text.includes("thread")) return "Threads";
-  if (text.includes("shopee")) return "Shopee";
+  if (text.includes("shopee") || text.includes("shoppe")) return "Shopee";
   return "Khác";
 };
 const serviceType = (service: Service) => {
@@ -164,6 +171,7 @@ function Shell({
 }) {
   const [open, setOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [currentUser, setCurrentUser] = useState<SessionUser>(user);
   const [serviceNav, setServiceNav] = useState<Service[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   useEffect(() => {
@@ -174,6 +182,24 @@ function Shell({
     window.addEventListener("notifications-updated", refresh);
     return () => { active = false; window.clearInterval(timer); window.removeEventListener("notifications-updated", refresh); };
   }, []);
+  useEffect(() => {
+    setCurrentUser(user);
+  }, [user]);
+
+  useEffect(() => {
+    let active = true;
+    const refreshUser = () => {
+      api<SessionUser>("/auth/me").then(u => {
+        if (active && u) setCurrentUser(u);
+      }).catch(() => {});
+    };
+    window.addEventListener("wallet-updated", refreshUser);
+    return () => {
+      active = false;
+      window.removeEventListener("wallet-updated", refreshUser);
+    };
+  }, []);
+
   const location = useLocation();
   const requestedPlatform =
     new URLSearchParams(location.search).get("platform") ?? "";
@@ -244,8 +270,18 @@ function Shell({
     .toUpperCase();
 
   return (
-    <div className={admin ? "shell admin-shell" : "shell"}>
-      <aside
+    <div className={admin ? "shell admin-shell" : "shell customer-shell"}>
+      {!admin && (
+        <AppSidebar
+          open={open}
+          onClose={() => setOpen(false)}
+          serviceMenu={serviceMenu}
+          user={user}
+          onLogoutClick={() => setConfirmLogout(true)}
+        />
+      )}
+      {admin && (
+        <aside
         className={`${open ? "sidebar open" : "sidebar"} ${admin ? "admin-sidebar" : "customer-sidebar"}`}
       >
         <Logo />
@@ -372,8 +408,10 @@ function Shell({
           </button>
         </div>
       </aside>
+      )}
 
       <main>
+        {admin ? (
         <header>
           <button className="menu" onClick={() => setOpen(true)} aria-label="Mở menu">
             <Menu size={19} />
@@ -401,7 +439,27 @@ function Shell({
             <NavLink to="/profile" className="mini-avatar" title="Hồ sơ tài khoản">{initials}</NavLink>
           </div>
         </header>
-        {admin ? <AdminRoutes /> : <CustomerRoutes userId={user.id} />}
+        ) : (
+          <TopNavbar
+            breadcrumbPlatform={location.pathname === '/order' ? (requestedPlatform || 'Facebook') : ''}
+            breadcrumbGroup={
+              location.pathname === '/dashboard' ? 'Tổng quan' :
+              location.pathname === '/pricing' ? 'Bảng giá' :
+              location.pathname === '/profile' ? 'Thông tin cá nhân' :
+              location.pathname === '/deposit' ? 'Nạp tiền' :
+              location.pathname === '/notifications' ? 'Thông báo' :
+              location.pathname === '/orders' ? (new URLSearchParams(location.search).get("group") ?? 'Lịch sử') :
+              location.pathname === '/schedule' ? 'Đặt lịch' :
+              location.pathname === '/order' ? (new URLSearchParams(location.search).get("group") ?? ((requestedPlatform || 'Facebook') === 'Facebook' ? 'FB Speed' : (requestedPlatform || 'Dịch vụ'))) :
+              'Hệ thống'
+            }
+            user={currentUser}
+            unreadNotifications={unreadNotifications}
+            onOpenMobileMenu={() => setOpen(true)}
+            onLogoutClick={() => setConfirmLogout(true)}
+          />
+        )}
+        {admin ? <AdminRoutes /> : <CustomerRoutes userId={user.id} user={user} />}
       </main>
       {open && <div className="backdrop" onClick={() => setOpen(false)} />}
       {confirmLogout && <LogoutConfirmation onClose={() => setConfirmLogout(false)} onConfirm={onLogout}/>}
@@ -409,14 +467,14 @@ function Shell({
   );
 }
 
-function CustomerRoutes({userId}:{userId:string}) {
+function CustomerRoutes({userId, user}:{userId:string; user: SessionUser}) {
   return (
     <Routes>
       <Route path="/dashboard" element={<DashboardHome />} />
       <Route path="/profile" element={<ProfilePage />} />
       <Route path="/notifications" element={<NotificationsPage />} />
-      <Route path="/order" element={<OrderPage />} />
-      <Route path="/orders" element={<OrdersPage />} />
+      <Route path="/order" element={<OrderPage user={user} />} />
+      <Route path="/orders" element={<OrderPage user={user} />} />
       <Route path="/schedule" element={<ScheduledOrdersPage />} />
       <Route path="/deposit" element={<DepositPage key={userId} userId={userId} />} />
       <Route path="/pricing" element={<Pricing />} />
@@ -495,11 +553,11 @@ function ServiceOrderTabs() {
   const group = new URLSearchParams(location.search).get("group");
   if (!group) return null;
   return <nav className="service-order-tabs" aria-label="Quản lý đơn theo dịch vụ">
-    {[["/order", "Tạo đơn"], ["/orders", "Danh sách đơn"], ["/schedule", "Lịch chạy đơn"]].map(([path, label]) => <NavLink key={path} to={`${path}${location.search}`} className={location.pathname === path ? "selected" : ""}>{label}</NavLink>)}
+    {[["/order", "Mua dịch vụ"], ["/orders", "Danh sách đơn"], ["/schedule", "Lịch chạy đơn"]].map(([path, label]) => <NavLink key={path} to={`${path}${location.search}`} className={location.pathname === path ? "selected" : ""}>{path==='/order'?<Boxes size={16}/>:path==='/orders'?<ClipboardList size={16}/>:<CalendarClock size={16}/>} {label}</NavLink>)}
   </nav>;
 }
 
-function OrderPage() {
+function OrderPage({ user }: { user?: SessionUser }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [submittedOrder, setSubmittedOrder] = useState<{ publicId: string; scheduled: boolean } | null>(null);
@@ -507,22 +565,40 @@ function OrderPage() {
   const requestedPlatform = queryParams.get("platform") ?? "";
   const requestedGroup = queryParams.get("group") ?? "";
   const [services, setServices] = useState<Service[]>([]);
+  const [loadingServices, setLoadingServices] = useState(true);
   const [serviceId, setServiceId] = useState("");
   const [confirmedReactionId, setConfirmedReactionId] = useState("");
-  const [quantity, setQuantity] = useState(1000);
+  const [quantity, setQuantity] = useState(1);
   const [comments, setComments] = useState("");
   const [link, setLink] = useState("");
+  const [batchMode, setBatchMode] = useState(false);
+  const [notes, setNotes] = useState("");
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [scheduledAt, setScheduledAt] = useState("");
   const [feedback, setFeedback] = useState("");
   const [feedbackError, setFeedbackError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [orderSupport, setOrderSupport] = useState<Capabilities | null>(null);
+  const [account, setAccount] = useState<SessionUser | null>(user ?? null);
+  const [deposited, setDeposited] = useState<number | null>(null);
+  const [loadingDeposited, setLoadingDeposited] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = () => {
+      void api<SessionUser>('/auth/me').then(value => { if(active)setAccount(value); }).catch(()=>{});
+      void api<{totalDeposited:number}>('/account/dashboard').then(value=>{if(active){setDeposited(value.totalDeposited);setLoadingDeposited(false);}}).catch(()=>{if(active)setLoadingDeposited(false);});
+    };
+    refresh();window.addEventListener('wallet-updated',refresh);
+    return()=>{active=false;window.removeEventListener('wallet-updated',refresh);};
+  }, []);
+
   const loadOrderServices = () =>
     api<
       Array<{
         id: string;
         displayName: string;
+        providerServiceId?: string;
         providerName: string;
         sellingRate: string;
         providerType: string;
@@ -535,6 +611,7 @@ function OrderPage() {
       const mapped = rows.map((x) => ({
         id: x.id,
         name: x.displayName,
+        providerServiceId: x.providerServiceId || x.id,
         providerName: x.providerName,
         platform: x.category.name,
         price: Number(x.sellingRate),
@@ -545,32 +622,49 @@ function OrderPage() {
         enabled: true,
       }));
       setServices(mapped);
+      setLoadingServices(false);
     });
+
   useEffect(() => {
     loadOrderServices().catch(() => {
+      setLoadingServices(false);
       setFeedbackError(true);
       setFeedback("Chưa thể tải danh sách dịch vụ. Vui lòng thử lại sau.");
     });
   }, []);
+
   useEffect(() => {
     api<Capabilities>("/health/capabilities")
       .then(setOrderSupport)
       .catch(() => null);
   }, []);
+
+  // Graceful fallback to Facebook if no query params present
+  const activePlatform = requestedPlatform || 'Facebook';
+  const platformServices = services.filter((s) => servicePlatform(s) === activePlatform && s.enabled);
+  const availableGroups = [...new Set(platformServices.map((s) => s.platform))];
+  const activeGroup =
+    requestedGroup && availableGroups.includes(requestedGroup)
+      ? requestedGroup
+      : (availableGroups[0] ?? (activePlatform === 'Facebook' ? 'LIKE BÀI VIẾT ( FB )' : ''));
+
   const filtered = services.filter(
     (s) =>
-      Boolean(requestedGroup) &&
-      servicePlatform(s) === requestedPlatform &&
-      s.platform === requestedGroup && s.enabled,
+      servicePlatform(s) === activePlatform &&
+      s.platform === activeGroup && s.enabled,
   );
   const serviceGroups = groupReactionServices(filtered);
+
   useEffect(() => {
-    setServiceId((current) =>
-      filtered.some((x) => String(x.id) === current)
+    setServiceId((current) => {
+      const nextId = filtered.some((x) => String(x.id) === current)
         ? current
-        : String(serviceGroups[0]?.variants[0]?.id ?? ""),
-    );
+        : String(serviceGroups[0]?.variants[0]?.id ?? "");
+      if (nextId) setConfirmedReactionId(nextId);
+      return nextId;
+    });
   }, [requestedPlatform, requestedGroup, services]);
+
   const selected = filtered.find((x) => String(x.id) === serviceId);
   const selectedGroup = serviceGroups.find(group => group.variants.some(service => String(service.id) === serviceId));
   const reaction = selected ? serviceReaction(selected) : null;
@@ -582,10 +676,12 @@ function OrderPage() {
   const descriptionDocument = new DOMParser().parseFromString(selected?.providerDescription ?? "", "text/html");
   descriptionDocument.querySelectorAll("style,script").forEach(node => node.remove());
   const serviceDescription = descriptionDocument.body.textContent?.trim();
+
   useEffect(() => {
     if (selected && (quantity < selected.min || quantity > selected.max))
       setQuantity(selected.min);
   }, [serviceId]);
+
   const validQuantity = Boolean(
     selected && orderQuantity >= selected.min && orderQuantity <= selected.max,
   );
@@ -595,6 +691,7 @@ function OrderPage() {
     (Boolean(scheduledAt) &&
       new Date(scheduledAt).getTime() >= Date.now() + 30_000);
   const total = selected ? (selected.price * orderQuantity) / 1000 : 0;
+
   async function submit() {
     if (busy) return;
     if (!selected || !validLink || !validQuantity || !validSchedule || !validReaction) {
@@ -628,6 +725,7 @@ function OrderPage() {
         }),
       });
       setSubmittedOrder({ publicId: order.publicId, scheduled: scheduleEnabled });
+      window.dispatchEvent(new Event('wallet-updated'));
       setConfirmedReactionId("");
       setLink("");
       setComments("");
@@ -649,8 +747,48 @@ function OrderPage() {
       setBusy(false);
     }
   }
+
+  // Map serviceGroups to clean ServiceSelector items
+  const selectorItems = serviceGroups.map((group) => {
+    const checked = group.variants.some(service => String(service.id) === serviceId);
+    const service = (checked ? selected : undefined) ?? group.variants[0];
+    return {
+      id: String(service.id),
+      name: group.name,
+      providerServiceId: (service as any).providerServiceId || String(service.id),
+      price: service.price,
+      min: service.min,
+      max: service.max,
+      providerDescription: service.providerDescription,
+      enabled: service.enabled,
+    };
+  });
+
+  const availableReactionCodes = (selectedGroup?.variants || [])
+    .map(v => serviceReaction(v))
+    .filter((r): r is ReactionCode => Boolean(r));
+
+  const handleServiceSelect = (id: string) => {
+    setServiceId(id);
+    const s = filtered.find(x => String(x.id) === id);
+    const r = s ? serviceReaction(s) : null;
+    if (r) {
+      setConfirmedReactionId(id);
+    } else {
+      setConfirmedReactionId("");
+    }
+  };
+
+  const handleReactionSelect = (code: ReactionCode) => {
+    const variant = selectedGroup?.variants.find(v => serviceReaction(v) === code);
+    if (variant) {
+      setServiceId(String(variant.id));
+      setConfirmedReactionId(String(variant.id));
+    }
+  };
+
   return (
-    <div className="page order-page">
+    <div className="smm-customer-page-wrap">
       {submittedOrder && <OrderSuccessDialog
         publicId={submittedOrder.publicId}
         scheduled={submittedOrder.scheduled}
@@ -660,99 +798,119 @@ function OrderPage() {
           navigate(`${submittedOrder.scheduled ? '/schedule' : '/orders'}${location.search}`);
         }}
       />}
-      <PageHead
-        eyebrow="ĐƠN HÀNG"
-        title={requestedGroup || "Tạo đơn mới"}
-        desc={requestedGroup ? "Chọn dịch vụ, nhập thông tin và xác nhận thanh toán." : "Chọn nhóm dịch vụ trong menu bên trái để bắt đầu."}
-      />
-      <ServiceOrderTabs />
-      <div className="form-layout order-layout">
-        <section className="card form-card">
-          <div className="order-section-title"><b>1. Chọn dịch vụ</b><span>{serviceGroups.length} dịch vụ</span></div>
-          <div className="order-service-options">
-            {serviceGroups.map((group) => {
-              const checked = group.variants.some(service => String(service.id) === serviceId);
-              const service = (checked ? selected : undefined) ?? group.variants[0];
-              const hasReactions = Boolean(serviceReaction(service));
-              const minimumPrice = Math.min(...group.variants.map(variant => variant.price));
-              const priceVaries = group.variants.some(variant => variant.price !== minimumPrice);
-              return (
-                <label
-                  className={
-                    checked
-                      ? "order-service-option selected"
-                      : "order-service-option"
-                  }
-                  key={group.key}
-                >
-                  <input
-                    type="radio"
-                    name="service"
-                    checked={checked}
-                    onChange={() => { setServiceId(String(group.variants[0].id)); setConfirmedReactionId(""); }}
-                  />
-                  <span className="service-radio" />
-                  <span className="order-service-copy">
-                    <b>{group.name}</b>
-                    <small>{service.platform}</small>
-                    <small>
-                      {hasReactions ? `${group.variants.length} cảm xúc · Chọn bên dưới` : `Giới hạn ${service.min.toLocaleString("vi-VN")} – ${service.max.toLocaleString("vi-VN")}`}
-                    </small>
-                  </span>
-                  <span className="order-service-price">
-                    <b>{priceVaries ? 'Từ ' : ''}{unitMoney(minimumPrice)}</b>
-                    <small>{priceVaries ? 'Từ ' : ''}{formatVND(minimumPrice)} / 1.000</small>
-                  </span>
+
+      {/* 3 Summary Cards with Red Marquee Warning */}
+      <AccountSummary user={account || user || null} totalDeposited={deposited} loadingDeposited={loadingDeposited} />
+
+      {/* ONE Large White Rounded Container */}
+      <div className="smm-main-container">
+        {/* Top Tabs: [ Mua Dịch Vụ ]  [ Lịch Sử ] */}
+        <div className="smm-top-tabs">
+          <NavLink
+            to={`/order${location.search}`}
+            className={location.pathname === '/order' ? 'smm-tab-link active' : 'smm-tab-link'}
+          >
+            <Boxes size={16} />
+            <span>Mua Dịch Vụ</span>
+          </NavLink>
+          <NavLink
+            to={`/orders${location.search}`}
+            className={location.pathname === '/orders' ? 'smm-tab-link active' : 'smm-tab-link'}
+          >
+            <ClipboardList size={16} />
+            <span>Lịch Sử</span>
+          </NavLink>
+        </div>
+
+        {location.pathname === '/orders' ? (
+          <OrderHistoryTab
+            activeGroup={activeGroup}
+            onNewOrderClick={() => navigate(`/order${location.search}`)}
+          />
+        ) : (
+          /* 2-Column Content Grid (Desktop: 72% / 28%, gap: 20px) */
+          <div className="smm-order-grid">
+          {/* LEFT Form Column (72%) */}
+          <div className="smm-form-column">
+            {/* Batch toggle switch */}
+            <div className="smm-batch-toggle-row">
+              <button
+                type="button"
+                className={`smm-switch ${batchMode ? 'active' : ''}`}
+                onClick={() => setBatchMode(!batchMode)}
+                role="switch"
+                aria-checked={batchMode}
+                aria-label="Mua nhiều đơn cùng lúc"
+              >
+                <span className="smm-switch-thumb" />
+              </button>
+              <span className="smm-batch-label">Mua nhiều đơn cùng lúc</span>
+            </div>
+
+            {/* ID hoặc link bài viết */}
+            <div className="smm-form-field">
+              <label className="smm-form-label">
+                {customComments ? "Link bài viết / video cần bình luận" : "ID hoặc link bài viết cần chạy"}
+              </label>
+              <input
+                className="smm-input-text"
+                placeholder="Hãy nhập đúng link, sai k hoàn tiền"
+                value={link}
+                onChange={(e) => setLink(e.target.value)}
+              />
+              {link && !validLink && (
+                <small className="field-error">
+                  Đường dẫn phải bắt đầu bằng http:// hoặc https://
+                </small>
+              )}
+            </div>
+
+            {/* Server Selection */}
+            <div className="smm-service-section">
+              <label className="smm-form-label">Chọn server</label>
+              <ServiceSelector
+                services={selectorItems}
+                selectedId={serviceId}
+                onSelect={handleServiceSelect}
+                serviceDescription={serviceDescription}
+                loading={loadingServices}
+              />
+            </div>
+
+            {/* Facebook-style circular reactions: ONLY when this service group has reactions */}
+            {availableReactionCodes.length > 0 && (
+              <ReactionSelector
+                availableCodes={availableReactionCodes}
+                selectedCode={reactionDetails?.code ?? availableReactionCodes[0]}
+                onSelect={handleReactionSelect}
+                disabled={busy}
+              />
+            )}
+
+            {/* Custom comments if applicable */}
+            {customComments && (
+              <div className="smm-form-field">
+                <label className="smm-form-label">
+                  Nội dung bình luận <span className="field-error">*</span>
                 </label>
-              );
-            })}
-            {!filtered.length && (
-              <div className="order-empty-services">
-                {requestedGroup ? "Nhóm này hiện chưa có dịch vụ đang mở bán." : "Chọn nhóm dịch vụ ở sidebar để xem các dịch vụ có thể đặt."}
+                <textarea
+                  className="smm-textarea"
+                  rows={5}
+                  value={comments}
+                  onChange={(e) => setComments(e.target.value)}
+                  placeholder="Nhập mỗi bình luận trên một dòng"
+                />
+                <small>
+                  Mỗi dòng không trống tương ứng 1 bình luận. Đã nhập <b>{commentLines.length}</b> bình luận.
+                </small>
               </div>
             )}
-          </div>
-          {reaction && selectedGroup && <fieldset className="order-reactions" disabled={busy}>
-            <legend>Chọn cảm xúc <span>(bắt buộc)</span></legend>
-            <p>Chọn cảm xúc bạn muốn tăng cho bài viết. Giá và giới hạn áp dụng theo lựa chọn.</p>
-            <div className="order-reaction-options">
-              {selectedGroup.variants.map(variant => {
-                const option = REACTIONS.find(item => item.code === serviceReaction(variant));
-                if (!option) return null;
-                const checked = confirmedReactionId === String(variant.id) && serviceId === String(variant.id);
-                return <label key={variant.id} className={`order-reaction-option${checked ? ' selected' : ''}`}>
-                  <input type="radio" name="reaction" value={option.code} checked={checked}
-                    onChange={() => { setServiceId(String(variant.id)); setConfirmedReactionId(String(variant.id)); }}/>
-                  <span className="order-reaction-emoji" aria-hidden="true">{option.emoji}</span>
-                  <span>{option.label}</span>
-                </label>;
-              })}
-            </div>
-            {!validReaction && <small>Vui lòng chọn một cảm xúc để tiếp tục.</small>}
-          </fieldset>}
-          <div className="order-section-title"><b>2. Thông tin đơn hàng</b></div>
-          <label>{customComments ? "Link bài viết / video cần bình luận" : "Đường dẫn bài viết / video / tài khoản"}</label>
-          <input
-            className="input"
-            value={link}
-            onChange={(e) => setLink(e.target.value)}
-            placeholder="Dán đường dẫn bài viết hoặc video"
-          />
-          {link && !validLink && (
-            <small className="field-error">
-              Đường dẫn phải bắt đầu bằng http:// hoặc https://
-            </small>
-          )}
-          {customComments && <div className="order-comments-field">
-            <label htmlFor="order-comments">Nội dung bình luận <span className="field-error">*</span></label>
-            <textarea id="order-comments" className="input" rows={7} maxLength={100000} value={comments} onChange={e => setComments(e.target.value)} placeholder="Nhập mỗi bình luận trên một dòng" />
-            <small>Mỗi dòng không trống tương ứng 1 bình luận. Đã nhập <b>{commentLines.length}</b> bình luận; số lượng và tổng tiền được tính tự động.</small>
-          </div>}
-          <div className="split">
-            <div>
-              <label>Số lượng</label>
+
+            {/* Số lượng */}
+            <div className="smm-form-field">
+              <label className="smm-form-label">Số lượng</label>
               <input
-                className="input"
+                className="smm-input-text"
                 type="number"
                 value={orderQuantity}
                 readOnly={customComments}
@@ -760,167 +918,126 @@ function OrderPage() {
                 max={selected?.max}
                 onChange={(e) => setQuantity(Number(e.target.value))}
               />
-            </div>
-            <div>
-              <label>Giới hạn</label>
-              <div className="input muted">
-                {selected
-                  ? `${selected.min.toLocaleString("vi-VN")} – ${selected.max.toLocaleString("vi-VN")}`
-                  : "—"}
-              </div>
-            </div>
-          </div>
-          {selected && !validQuantity && (
-            <small className="field-error">
-              Nhập từ {selected.min.toLocaleString("vi-VN")} đến{" "}
-              {selected.max.toLocaleString("vi-VN")}.
-            </small>
-          )}
-          <div className="schedule-order-setting">
-            <div>
-              <b>Hẹn giờ lên đơn</b>
-              <small>
-                Đơn chỉ được gửi sang nhà cung cấp khi đến thời gian đã chọn.
-              </small>
-            </div>
-            <button
-              className={scheduleEnabled ? "toggle on" : "toggle"}
-              onClick={() => setScheduleEnabled((value) => !value)}
-              aria-label="Bật tắt hẹn giờ lên đơn"
-            >
-              <i />
-            </button>
-          </div>
-          {scheduleEnabled && (
-            <div className="schedule-time-field">
-              <label>Thời gian chạy</label>
-              <input
-                className="input"
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={(e) => setScheduledAt(e.target.value)}
-              />
-              {!validSchedule && scheduledAt && (
+              {selected && !validQuantity && (
                 <small className="field-error">
-                  Chọn thời gian trong tương lai.
+                  Nhập từ {selected.min.toLocaleString("vi-VN")} đến{" "}
+                  {selected.max.toLocaleString("vi-VN")}.
                 </small>
               )}
             </div>
-          )}
-          <div className="order-review">
-            <div className="order-review-heading">
+
+            {/* Giá Tiền Mỗi Tương Tác (read-only) */}
+            <div className="smm-form-field">
+              <label className="smm-form-label">Giá Tiền Mỗi Tương Tác</label>
+              <input
+                className="smm-input-text read-only"
+                readOnly
+                value={selected ? formatUnitNumber(selected.price) : "0"}
+              />
+            </div>
+
+            {/* Tổng Giá (read-only) */}
+            <div className="smm-form-field">
+              <label className="smm-form-label">Tổng Giá</label>
+              <input
+                className="smm-input-text read-only"
+                readOnly
+                value={selected ? `${new Intl.NumberFormat('vi-VN').format(Math.round(total))} VND` : "0 VND"}
+              />
+            </div>
+
+            {/* Hẹn giờ lên đơn */}
+            <div className="schedule-order-setting">
               <div>
-                <small>3. KIỂM TRA & XÁC NHẬN</small>
-                <b>{selectedGroup?.name ?? "Chưa chọn dịch vụ"}</b>
+                <b>Hẹn giờ lên đơn</b>
+                <small>Đơn chỉ được gửi sang nhà cung cấp khi đến thời gian đã chọn.</small>
               </div>
-              <div className="order-total-highlight"><small>TỔNG THANH TOÁN</small><strong>{selected && validQuantity && validReaction ? formatVND(total) : "—"}</strong></div>
+              <button
+                className={scheduleEnabled ? "toggle on" : "toggle"}
+                onClick={() => setScheduleEnabled((value) => !value)}
+                aria-label="Bật tắt hẹn giờ lên đơn"
+                role="switch"
+                aria-checked={scheduleEnabled}
+              >
+                <i />
+              </button>
             </div>
-            <div className="order-review-details">
-              {reactionDetails && <span>Cảm xúc <b>{validReaction ? `${reactionDetails.emoji} ${reactionDetails.label}` : 'Chưa chọn'}</b></span>}
-              <span>
-                Đơn giá <b>{selected ? unitMoney(selected.price) : "—"}</b>
-              </span>
-              <span>
-                Số lượng <b>{orderQuantity.toLocaleString("vi-VN")}</b>
-              </span>
-              {scheduleEnabled && (
-                <span>
-                  Chạy lúc{" "}
-                  <b>
-                    {scheduledAt
-                      ? new Date(scheduledAt).toLocaleString("vi-VN")
-                      : "Chưa chọn"}
-                  </b>
-                </span>
-              )}
+            {scheduleEnabled && (
+              <div className="smm-form-field">
+                <label className="smm-form-label">Thời gian chạy</label>
+                <input
+                  className="smm-input-text"
+                  type="datetime-local"
+                  value={scheduledAt}
+                  onChange={(e) => setScheduledAt(e.target.value)}
+                />
+              </div>
+            )}
+
+            {/* Ghi chú */}
+            <div className="smm-form-field">
+              <label className="smm-form-label">Ghi chú</label>
+              <input
+                className="smm-input-text"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Tuỳ chọn. Dùng để ghi chú đơn hàng của bạn"
+              />
             </div>
-            <button
-              className="primary wide"
-              disabled={
-                !selected ||
-                !validLink ||
-                !validQuantity ||
-                !validSchedule ||
-                !validReaction ||
-                busy
-              }
-              onClick={submit}
-            >
-              {busy
-                ? "Đang ghi nhận…"
-                : scheduleEnabled
-                  ? "Xác nhận đặt lịch"
-                  : "Xác nhận đặt đơn"}
-            </button>
+
+            {/* Feedback / Error */}
+            {feedback && (
+              <div className={feedbackError ? "form-error" : "form-success"}>
+                {feedback}
+              </div>
+            )}
+
+            {/* Bottom Actions: [ Mua ] [ Quản Lý ID ] */}
+            <div className="smm-order-actions-row">
+              <button
+                className="smm-btn-buy"
+                disabled={
+                  !selected ||
+                  !validLink ||
+                  !validQuantity ||
+                  !validSchedule ||
+                  !validReaction ||
+                  busy
+                }
+                onClick={submit}
+              >
+                {busy
+                  ? "Đang ghi nhận…"
+                  : scheduleEnabled
+                    ? "Xác nhận đặt lịch"
+                    : "Mua"}
+              </button>
+              <NavLink to={`/orders${location.search}`} className="smm-btn-manage-id">
+                <CalendarClock size={16} />
+                <span>Quản Lý ID</span>
+              </NavLink>
+            </div>
           </div>
-          <div className="notice">
-            Sau khi xác nhận, bạn có thể theo dõi tiến độ trong mục Đơn hàng.
+
+          {/* RIGHT Column (28%) */}
+          <div className="smm-sidebar-column">
+            <HelpVideoCard />
+            <NoticeCard
+              serviceDescription={serviceDescription}
+              orderSupport={orderSupport}
+            />
           </div>
-          {feedback && (
-            <div className={feedbackError ? "form-error" : "form-success"}>
-              {feedback}
-            </div>
-          )}
-        </section>
-        <aside className="order-help">
-          {serviceDescription && <section className="card order-help-card"><h2>Lưu ý dịch vụ đã chọn</h2><p style={{whiteSpace: "pre-line", overflowWrap: "anywhere"}}>{serviceDescription}</p></section>}
-          <section className="card order-help-card">
-            <div className="order-help-icon">
-              <Info />
-            </div>
-            <h2>Đặt đơn chính xác</h2>
-            <ol>
-              <li>
-                Mở đúng bài viết, video hoặc tài khoản cần tăng tương tác.
-              </li>
-              <li>Sao chép đường dẫn đầy đủ rồi dán vào ô bên cạnh.</li>
-              <li>Không tạo nhiều đơn giống nhau khi đơn cũ còn đang chạy.</li>
-              <li>
-                Không thay đổi quyền riêng tư hoặc xóa nội dung trong lúc chạy.
-              </li>
-            </ol>
-          </section>
-          <section className="card order-help-card support-card">
-            <div className="order-help-icon">
-              <Headphones />
-            </div>
-            <h2>Cần hỗ trợ?</h2>
-            <p>
-              Liên hệ bộ phận hỗ trợ nếu bạn chưa chắc đường dẫn hoặc loại dịch
-              vụ cần chọn.
-            </p>
-            <div className="order-support-actions">
-              {typeof orderSupport?.telegram === "string" &&
-                orderSupport.telegram && (
-                  <a
-                    className="primary"
-                    href={orderSupport.telegram}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Telegram
-                  </a>
-                )}
-              {typeof orderSupport?.fanpage === "string" &&
-                orderSupport.fanpage && (
-                  <a
-                    className="secondary"
-                    href={orderSupport.fanpage}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Fanpage
-                  </a>
-                )}
-              {!orderSupport?.telegram && !orderSupport?.fanpage && (
-                <NavLink className="secondary" to="/support">
-                  Trung tâm hỗ trợ
-                </NavLink>
-              )}
-            </div>
-          </section>
-        </aside>
+        </div>
+        )}
+
+        {/* Footer */}
+        <footer className="smm-page-footer">
+          <span>2020 © @hacklike17.com</span> | <a href="#terms">Điều khoản sử dụng</a>
+        </footer>
       </div>
+
+      {/* Floating Support Dock */}
+      <FloatContactWidget support={orderSupport} />
     </div>
   );
 }

@@ -25,8 +25,23 @@ export class OrdersController {
       data: await this.orders.create(user.sub, key ?? "", dto),
     };
   }
-  @Get() async list(@CurrentUser() user: AuthUser, @Query("group") group?: string) {
-    return { success: true, data: await this.orders.list(user.sub, group) };
+  @Get() async list(
+    @CurrentUser() user: AuthUser,
+    @Query("group") group?: string,
+    @Query("search") search?: string,
+    @Query("status") status?: string,
+    @Query("page") page?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return {
+      success: true,
+      data: await this.orders.list(user.sub, group, {
+        search,
+        status,
+        page: page ? Number(page) : undefined,
+        limit: limit ? Number(limit) : undefined,
+      }),
+    };
   }
   @Get(":id") async get(
     @Param("id") id: string,

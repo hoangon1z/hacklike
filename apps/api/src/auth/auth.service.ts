@@ -50,5 +50,5 @@ export class AuthService {
   async logout(refreshToken?: string) {
     if (refreshToken) await this.prisma.refreshSession.updateMany({ where: { tokenHash: createHash('sha256').update(refreshToken).digest('hex'), revokedAt: null }, data: { revokedAt: new Date() } });
   }
-  me(userId: string) { return this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { id:true,email:true,displayName:true,role:true,status:true,passwordChangeRequired:true,wallet:{select:{balance:true,reserved:true}} } }); }
+  me(userId: string) { return this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { id:true,email:true,displayName:true,role:true,status:true,passwordChangeRequired:true,wallet:{select:{balance:true,reserved:true}},createdAt:true,updatedAt:true } }); }
 }

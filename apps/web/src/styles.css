@@ -2422,3 +2422,6 @@ input[type="checkbox"] {
 .deposit-history td { font-variant-numeric:tabular-nums; }
 .notification-error .order-success-icon { color:#b91c1c; background:#fee2e2; }
 .notification-info .order-success-icon { color:#2563eb; background:#eff6ff; }
+/* Commercial SMM Panel Theme */
+@import './smm-panel.css';
+
