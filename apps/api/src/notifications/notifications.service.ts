@@ -10,13 +10,17 @@ const money=(value:Prisma.Decimal|number|string)=>new Intl.NumberFormat('vi-VN',
 @Injectable()
 export class NotificationsService {
   constructor(private readonly prisma:PrismaService,private readonly config:ConfigService){}
-  configured(){return Boolean(this.config.get('TELEGRAM_BOT_TOKEN')&&this.config.get('TELEGRAM_ADMIN_CHAT_ID'));}
+  private chatIds(){return [...new Set((this.config.get<string>('TELEGRAM_ADMIN_CHAT_ID')??'').split(',').map(value=>value.trim()).filter(value=>/^-?\d+$/.test(value)))];}
+  configured(){return Boolean(this.config.get('TELEGRAM_BOT_TOKEN')&&this.chatIds().length);}
   async send(text:string){
-    const token=this.config.get<string>('TELEGRAM_BOT_TOKEN'),chatId=this.config.get<string>('TELEGRAM_ADMIN_CHAT_ID');
-    if(!token||!chatId)throw new Error('TELEGRAM_NOT_CONFIGURED');
-    const response=await fetch('https://api.telegram.org/bot'+token+'/sendMessage',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:chatId,text,link_preview_options:{is_disabled:true}}),signal:AbortSignal.timeout(8000)});
-    const body=await response.json() as {ok?:boolean};
-    if(!response.ok||body.ok!==true)throw new Error('TELEGRAM_SEND_FAILED');
+    const token=this.config.get<string>('TELEGRAM_BOT_TOKEN'),chatIds=this.chatIds();
+    if(!token||!chatIds.length)throw new Error('TELEGRAM_NOT_CONFIGURED');
+    const deliveries=await Promise.allSettled(chatIds.map(async chatId=>{
+      const response=await fetch('https://api.telegram.org/bot'+token+'/sendMessage',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:chatId,text,link_preview_options:{is_disabled:true}}),signal:AbortSignal.timeout(8000)});
+      const body=await response.json() as {ok?:boolean};
+      if(!response.ok||body.ok!==true)throw new Error('TELEGRAM_SEND_FAILED');
+    }));
+    if(deliveries.some(delivery=>delivery.status==='rejected'))throw new Error('TELEGRAM_SEND_FAILED');
   }
   private async transition(key:string,active:boolean,text:string,recovery?:string){
     if(!this.configured())return;

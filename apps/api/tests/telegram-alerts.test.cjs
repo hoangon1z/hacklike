@@ -7,7 +7,7 @@ function fixture(){
   const flags=new Map(),events=[];
   const tx={$executeRaw:async()=>1,systemSetting:{findUnique:async({where})=>where.key==='PROVIDER_RATE_MULTIPLIER'?{value:25000}:flags.has(where.key)?{value:flags.get(where.key)}:null,upsert:async({where,update})=>flags.set(where.key,update.value)},outboxEvent:{create:async({data})=>events.push(data)}};
   const db={...tx,$transaction:async fn=>fn(tx)};
-  return {service:new NotificationsService(db,{get:()=> 'test-only'}),events,db};
+  return {service:new NotificationsService(db,{get:key=>key==='TELEGRAM_ADMIN_CHAT_ID'?'123':'test-only'}),events,db};
 }
 test('below 100k alerts once per episode, exact threshold recovers',async()=>{
   const {service,events}=fixture();
