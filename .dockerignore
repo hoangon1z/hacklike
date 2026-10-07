@@ -3,6 +3,9 @@ node_modules
 .env
 .env.production
 .env.*
+**/.env
+**/.env.*
+**/__pycache__
 *.pem
 *.key
 *.p12

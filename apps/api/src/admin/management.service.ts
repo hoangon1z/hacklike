@@ -9,6 +9,7 @@ import { ProviderService } from '../provider/provider.service';
 import { ConfigService } from '@nestjs/config';
 import { AuthUser } from '../auth/auth.types';
 import { DomainError } from '../shared/domain-error';
+import { matchesSepayBank, sepayAccounts, SepayBankAccount } from '../payments/sepay-config';
 import { CreateManagedUserDto, EditManagedUserDto, ResetManagedPasswordDto, WalletAdjustmentDto, ManagedOrderActionDto, PaymentReconcileDto, PageQuery,ManagedPaymentActionDto } from './dto/management.dto';
 
 const userSelect={id:true,email:true,displayName:true,role:true,status:true,createdAt:true,wallet:{select:{balance:true,reserved:true}}} as const;
@@ -176,7 +177,12 @@ export class ManagementService {
    if(previous){if(payment.depositRequestId!==id||!previous.amount.equals(dto.amountVnd))fail('IDEMPOTENCY_CONFLICT');return request;}
    if(payment.depositRequestId||['COMPLETED','OVERPAID','REJECTED'].includes(request.status))fail('PAYMENT_ALREADY_PROCESSED');
    let available=payment.amount;
-   if(request.method==='BANKING'){if(payment.provider!=='SEPAY')fail('PAYMENT_METHOD_MISMATCH');}
+   if(request.method==='BANKING'){
+    if(payment.provider!=='SEPAY')fail('PAYMENT_METHOD_MISMATCH');
+    const snapshot=request.banking as SepayBankAccount|null;
+    const raw=payment.rawPayload as Record<string,unknown>;
+    if(snapshot&&!matchesSepayBank(snapshot,raw.accountNumber??raw.account_number,raw.gateway??raw.bank_brand_name,raw.subAccount??raw.sub_account))fail('PAYMENT_ACCOUNT_MISMATCH');
+   }
    else{
     if(payment.provider!=='BINANCE'||payment.network!==request.network||!request.usdtRate)fail('PAYMENT_METHOD_MISMATCH');
     const address=(payment.rawPayload as Record<string,unknown>)?.address;
@@ -197,13 +203,13 @@ export class ManagementService {
  async importSepay(externalId:string,reason:string,actor:AuthUser){
   if(actor.role!=='SUPER_ADMIN')fail('SUPER_ADMIN_REQUIRED',403);
   if(!/^\d+$/.test(externalId))fail('INVALID_TRANSACTION_ID',422);
-  const token=this.config.get<string>('SEPAY_API_TOKEN'),account=this.config.get<string>('SEPAY_ACCOUNT_NUMBER');
-  if(!token||!account)fail('SEPAY_NOT_CONFIGURED');
+  const token=this.config.get<string>('SEPAY_API_TOKEN'),accounts=sepayAccounts(this.config);
+  if(!token||!accounts.length)fail('SEPAY_NOT_CONFIGURED');
   const response=await fetch(`https://my.sepay.vn/userapi/transactions/details/${externalId}`,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(15000)});
   if(!response.ok)fail('PAYMENT_PROVIDER_UNAVAILABLE');
-  const result=await response.json() as {transaction?:{id:string;account_number:string;amount_in:string;amount_out:string;transaction_date:string;transaction_content:string}};
+  const result=await response.json() as {transaction?:{id:string;account_number:string;bank_brand_name:string;sub_account?:string;amount_in:string;amount_out:string;transaction_date:string;transaction_content:string}};
   const transaction=result.transaction;
-  if(!transaction||String(transaction.id)!==externalId||transaction.account_number!==account||Number(transaction.amount_in)<=0||Number(transaction.amount_out)>0)fail('PAYMENT_EVIDENCE_NOT_VERIFIED');
+  if(!transaction||String(transaction.id)!==externalId||!accounts.some(account=>matchesSepayBank(account,transaction.account_number,transaction.bank_brand_name,transaction.sub_account))||Number(transaction.amount_in)<=0||Number(transaction.amount_out)>0)fail('PAYMENT_EVIDENCE_NOT_VERIFIED');
   const receivedAt=new Date(transaction.transaction_date.replace(' ','T')+'+07:00');if(!Number.isFinite(receivedAt.getTime()))fail('PAYMENT_EVIDENCE_NOT_VERIFIED');
   return this.db.$transaction(async tx=>{
    await this.actor(tx,actor,true);

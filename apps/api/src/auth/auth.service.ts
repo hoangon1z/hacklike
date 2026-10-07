@@ -9,8 +9,16 @@ import { LoginDto, RegisterDto } from './dto/auth.dto';
 @Injectable()
 export class AuthService {
   constructor(private readonly prisma: PrismaService, private readonly jwt: JwtService, private readonly config: ConfigService) {}
-  private publicUser(user: { id:string; email:string; displayName:string; role:string; status:string; passwordChangeRequired?:boolean }) {
-    return { id:user.id, email:user.email, displayName:user.displayName, role:user.role, status:user.status,passwordChangeRequired:user.passwordChangeRequired??false };
+  private publicUser(user: { id:string; email:string; displayName:string; role:string; status:string; passwordChangeRequired?:boolean; wallet?:{balance:unknown;reserved:unknown}|null }) {
+    return {
+      id:user.id,
+      email:user.email,
+      displayName:user.displayName,
+      role:user.role,
+      status:user.status,
+      passwordChangeRequired:user.passwordChangeRequired??false,
+      ...(user.wallet ? { wallet:user.wallet } : {}),
+    };
   }
   async register(dto: RegisterDto) {
     const email = dto.email.trim().toLowerCase();
@@ -20,7 +28,7 @@ export class AuthService {
     return this.publicUser(user);
   }
   async login(dto: LoginDto, meta: { userAgent?: string; ipAddress?: string }) {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email.trim().toLowerCase() } });
+    const user = await this.prisma.user.findUnique({ where: { email: dto.email.trim().toLowerCase() }, include:{wallet:true} });
     if (!user || user.status !== 'ACTIVE' || !await compare(dto.password, user.passwordHash)) throw new UnauthorizedException();
     const payload = { sub: user.id, email: user.email, role: user.role, v: user.tokenVersion };
     const accessToken = await this.jwt.signAsync(payload, { secret: this.config.getOrThrow('JWT_ACCESS_SECRET'), expiresIn: '15m' });
@@ -31,7 +39,7 @@ export class AuthService {
   async refresh(token?: string) {
     if (!token) throw new UnauthorizedException();
     const tokenHash = createHash('sha256').update(token).digest('hex');
-    const session = await this.prisma.refreshSession.findUnique({ where: { tokenHash }, include: { user: true } });
+    const session = await this.prisma.refreshSession.findUnique({ where: { tokenHash }, include: { user:{include:{wallet:true}} } });
     if (!session || session.revokedAt || session.expiresAt < new Date() || session.user.status !== 'ACTIVE') throw new UnauthorizedException();
     const accessToken = await this.jwt.signAsync({ sub: session.user.id, email: session.user.email, role: session.user.role, v: session.user.tokenVersion }, { secret: this.config.getOrThrow('JWT_ACCESS_SECRET'), expiresIn: '15m' });
     const refreshToken=randomBytes(48).toString('base64url');

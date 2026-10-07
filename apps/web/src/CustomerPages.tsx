@@ -1,10 +1,10 @@
+import {formatVND} from './utils/formatVND';
 import { FormEvent, useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { api, ApiError, SessionUser } from './api';
 import './customer-design.css';
 import { ArrowDownLeft, ArrowUpRight, Bell, BookOpen, CheckCircle2, ChevronRight, CircleDollarSign, ClipboardList, CreditCard, Headphones, Mail, Megaphone, Plus, Send, Settings2, ShieldCheck, Sparkles, Tag, TrendingUp, UserRound, Wallet } from 'lucide-react';
 
-const money=(n:number)=>`${n.toLocaleString('vi-VN',{maximumFractionDigits:2})} đ`;
 type Post={id:string;title:string;content:string;kind:string;published:boolean;createdAt:string};
 type Notification={id:string;title:string;content:string;status?:string;createdAt:string;href:string;read:boolean};
 type Summary={historicalDeposited?:number;totalDeposited:number;totalSpent:number;orderCount:number;newOrders:number;averageOrder:number;daily:{date:string;amount:number}[];posts:Post[]};
@@ -29,9 +29,9 @@ function SpendingChart({ daily }: { daily: Summary['daily'] }) {
   const amount = rows.reduce((sum, row) => sum + row.amount, 0);
   return <section className="card insight-card">
     <div className="section-heading"><div><span className="section-kicker">HOẠT ĐỘNG TÀI KHOẢN</span><h2>Biểu đồ chi tiêu</h2></div><div className="period-switch" aria-label="Khoảng thời gian">{[7, 14, 30].map(value => <button key={value} className={days === value ? 'selected' : ''} aria-pressed={days === value} onClick={() => { setDays(value); setHovered(null); }}>{value} ngày</button>)}</div></div>
-    <div className="chart-summary"><div><strong>{money(amount)}</strong><small>Chi tiêu ròng trong {days} ngày gần nhất</small></div><span><i/>Thanh toán trừ khoản hoàn</span></div>
-    <div className="area-chart"><div className="chart-axis">{[top, (top + bottom) / 2, bottom].map((value, i) => <span key={i}>{money(value)}</span>)}</div><div className="chart-canvas">
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Biểu đồ chi tiêu ${days} ngày, tổng ${money(amount)}`}>
+    <div className="chart-summary"><div><strong>{formatVND(amount)}</strong><small>Chi tiêu ròng trong {days} ngày gần nhất</small></div><span><i/>Thanh toán trừ khoản hoàn</span></div>
+    <div className="area-chart"><div className="chart-axis">{[top, (top + bottom) / 2, bottom].map((value, i) => <span key={i}>{formatVND(value)}</span>)}</div><div className="chart-canvas">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Biểu đồ chi tiêu ${days} ngày, tổng ${formatVND(amount)}`}>
         <defs><linearGradient id="spending-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#397aef" stopOpacity=".22"/><stop offset="100%" stopColor="#397aef" stopOpacity=".02"/></linearGradient></defs>
         {[12, height/2, height-12].map(value => <line key={value} x1={left} x2={right} y1={value} y2={value} stroke="#e9eef6" strokeDasharray="4 5"/>)}
         {bottom < 0 && <line x1={left} x2={right} y1={y(0)} y2={y(0)} stroke="#bccce0"/>}
@@ -39,8 +39,8 @@ function SpendingChart({ daily }: { daily: Summary['daily'] }) {
         <path d={line} fill="none" stroke="#397aef" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round"/>
         {chosen && <><line x1={chosen.x} x2={chosen.x} y1="12" y2={height-12} stroke="#9ab9f6" strokeDasharray="4 4"/><circle cx={chosen.x} cy={chosen.y} r="5" fill="#397aef" stroke="white" strokeWidth="3"/></>}
       </svg>
-      <div className="chart-hit-targets">{points.map((p, i) => <button key={p.date} aria-label={`${p.date}: ${money(p.amount)}`} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)} onFocus={() => setHovered(i)} onBlur={() => setHovered(null)} onClick={() => setHovered(i)}/>)}</div>
-      {chosen && <div className="area-tooltip" role="status"><small>{chosen.date.split('-').reverse().join('/')}</small><b>{money(chosen.amount)}</b></div>}
+      <div className="chart-hit-targets">{points.map((p, i) => <button key={p.date} aria-label={`${p.date}: ${formatVND(p.amount)}`} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)} onFocus={() => setHovered(i)} onBlur={() => setHovered(null)} onClick={() => setHovered(i)}/>)}</div>
+      {chosen && <div className="area-tooltip" role="status"><small>{chosen.date.split('-').reverse().join('/')}</small><b>{formatVND(chosen.amount)}</b></div>}
       <div className="chart-date-labels">{[points[0], points[Math.floor(points.length/2)], points[points.length-1]].filter(Boolean).map((p,i) => <span key={i}>{p.date.slice(8)}/{p.date.slice(5,7)}</span>)}</div>
     </div></div>
     {rows.every(row => row.amount === 0) && <div className="chart-zero"><TrendingUp size={15}/> Chưa có chi tiêu trong khoảng thời gian này.</div>}
@@ -62,8 +62,8 @@ export function DashboardHome() {
     const load = () => Promise.all([api<Summary>('/account/dashboard'), api<SessionUser>('/auth/me'), api<Notification[]>('/account/notifications')])
       .then(([d, u, n]) => { if (active) { setData(d); setUser(u); setNotifications(n); setError(''); } })
       .catch(() => { if (active) setError('Chưa thể tải thông tin tài khoản.'); });
-    load(); const timer = setInterval(load, 30000);
-    return () => { active = false; clearInterval(timer); };
+    load(); window.addEventListener("wallet-updated", load); const timer = setInterval(load, 30000);
+    return () => { active = false; clearInterval(timer); window.removeEventListener("wallet-updated", load); };
   }, [retry]);
   if (!data || !user) return <div className="page customer-page home-dashboard">{error ? <div className="card dashboard-load-error"><Bell/><h2>{error}</h2><button className="secondary" onClick={() => setRetry(value => value + 1)}>Thử lại</button></div> : <div className="dashboard-skeleton" role="status" aria-label="Đang tải tổng quan"><div/><div/><div/><div/></div>}</div>;
   const initials = user.displayName.trim().split(/\s+/).slice(-2).map(value => value[0]).join('').toUpperCase();
@@ -79,16 +79,16 @@ export function DashboardHome() {
     {error && <div className="form-error" role="alert">{error} <button onClick={() => setRetry(value => value + 1)}>Thử lại</button></div>}
     <div className="dashboard-account-row">
       <section className="card identity-card"><div className="identity-top"><span className="identity-avatar">{initials}<i/></span><NavLink to="/profile" className="identity-edit" aria-label="Chỉnh sửa hồ sơ"><ArrowUpRight size={19}/></NavLink></div><span className="section-kicker">THÔNG TIN TÀI KHOẢN</span><h2>{user.displayName}</h2><p className="identity-email"><Mail size={14}/>{user.email}</p><div className="identity-bottom"><span><ShieldCheck size={14}/>{user.status === 'ACTIVE' ? 'Tài khoản hoạt động' : 'Tài khoản chưa hoạt động'}</span><NavLink to="/profile">Hồ sơ <ChevronRight size={14}/></NavLink></div></section>
-      <section className="wallet-hero"><div className="wallet-hero-heading"><span><Wallet size={19}/> Số dư khả dụng</span><span className="wallet-currency">VND</span></div><strong>{money(Number(user.wallet?.balance ?? 0) - Number(user.wallet?.reserved ?? 0))}</strong><div className="wallet-hero-bottom"><small>Đang giữ cho đơn hàng<br/><b>{money(Number(user.wallet?.reserved ?? 0))}</b></small><NavLink to="/deposit"><Plus size={16}/> Nạp tiền</NavLink></div></section>
-      <section className="card deposit-summary"><span className="summary-icon"><CircleDollarSign size={23}/></span><span className="section-kicker">TỔNG NẠP THÀNH CÔNG</span><strong>{money(data.totalDeposited)}</strong><p>{data.historicalDeposited?'Bao gồm tổng nạp đã chuyển từ website cũ.':'Tổng tiền đã được cộng vào ví của bạn.'}</p><NavLink to="/deposit">Quản lý nạp tiền <ArrowUpRight size={15}/></NavLink></section>
+      <section className="wallet-hero"><div className="wallet-hero-heading"><span><Wallet size={19}/> Số dư khả dụng</span><span className="wallet-currency">VND</span></div><strong>{formatVND(Number(user.wallet?.balance ?? 0) - Number(user.wallet?.reserved ?? 0))}</strong><div className="wallet-hero-bottom"><small>Đang giữ cho đơn hàng<br/><b>{formatVND(Number(user.wallet?.reserved ?? 0))}</b></small><NavLink to="/deposit"><Plus size={16}/> Nạp tiền</NavLink></div></section>
+      <section className="card deposit-summary"><span className="summary-icon"><CircleDollarSign size={23}/></span><span className="section-kicker">TỔNG NẠP THÀNH CÔNG</span><strong>{formatVND(data.totalDeposited)}</strong><p>{data.historicalDeposited?'Bao gồm tổng nạp đã chuyển từ website cũ.':'Tổng tiền đã được cộng vào ví của bạn.'}</p><NavLink to="/deposit">Quản lý nạp tiền <ArrowUpRight size={15}/></NavLink></section>
     </div>
     <section className="dashboard-quick-actions">{actions.map(({href,title,detail,Icon,tone}) => <NavLink key={href} to={href}><span className={`quick-action-icon ${tone}`}><Icon size={21}/></span><span><b>{title}</b><small>{detail}</small></span><ChevronRight size={17}/></NavLink>)}</section>
     <div className="dashboard-content-grid">
       <div className="dashboard-primary">
         <section className="dashboard-metrics">
-          <article><span className="metric-symbol blue"><TrendingUp size={19}/></span><div><span>Tổng chi tiêu</span><strong>{money(data.totalSpent)}</strong><small>Toàn thời gian · đã trừ hoàn tiền</small></div></article>
+          <article><span className="metric-symbol blue"><TrendingUp size={19}/></span><div><span>Tổng chi tiêu</span><strong>{formatVND(data.totalSpent)}</strong><small>Toàn thời gian · đã trừ hoàn tiền</small></div></article>
           <article><span className="metric-symbol purple"><ClipboardList size={19}/></span><div><span>Đơn tạo mới</span><strong>{data.newOrders.toLocaleString('vi-VN')} <small>đơn</small></strong><small>Trong 30 ngày gần nhất</small></div></article>
-          <article><span className="metric-symbol orange"><CircleDollarSign size={19}/></span><div><span>Giá trị trung bình</span><strong>{money(data.averageOrder)}</strong><small>Mỗi đơn đã thanh toán</small></div></article>
+          <article><span className="metric-symbol orange"><CircleDollarSign size={19}/></span><div><span>Giá trị trung bình</span><strong>{formatVND(data.averageOrder)}</strong><small>Mỗi đơn đã thanh toán</small></div></article>
         </section>
         <SpendingChart daily={data.daily}/>
         <section className="card news-panel"><div className="section-heading"><div><span className="section-kicker">CẬP NHẬT TỪ Hacklike43</span><h2>Bảng tin & khuyến mãi</h2></div><span className="subtle-icon"><Megaphone size={20}/></span></div>
@@ -115,7 +115,7 @@ export function NotificationsPage() {
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const load = () => api<Notification[]>('/account/notifications').then(data => { setRows(data); setError(''); }).catch(() => setError('Chưa thể tải thông báo.')).finally(() => setLoading(false));
-  useEffect(() => { load(); const timer = setInterval(load, 30000); return () => clearInterval(timer); }, []);
+  useEffect(() => { load(); window.addEventListener("wallet-updated", load); const timer = setInterval(load, 30000); return () => { clearInterval(timer); window.removeEventListener("wallet-updated", load); }; }, []);
   const unread = rows.filter(n => !n.read).length;
   const visible = filter === 'unread' ? rows.filter(n => !n.read) : rows;
   async function markRead() {

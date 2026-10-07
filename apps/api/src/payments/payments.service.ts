@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { DomainError } from '../shared/domain-error';
 import { CreateDepositDto } from './dto/create-deposit.dto';
+import { matchesSepayBank, sepayDepositAccounts, sepayAccounts, sepayConfigured, SepayBankAccount } from './sepay-config';
 
 @Injectable()
 export class PaymentsService {
@@ -13,9 +14,14 @@ export class PaymentsService {
   private async settings(){const rows=await this.prisma.systemSetting.findMany({where:{key:{in:['USDT_RATE','BANKING_ENABLED','USDT_TRC20_ENABLED','USDT_BEP20_ENABLED']}}});return Object.fromEntries(rows.map(x=>[x.key,x.value]));}
   async create(userId:string,dto:CreateDepositDto){
     const settings=await this.settings();
-    const bankingReady=Boolean(this.config.get('SEPAY_API_TOKEN')&&this.config.get('SEPAY_WEBHOOK_SECRET')&&this.config.get('SEPAY_BANK_NAME')&&this.config.get('SEPAY_ACCOUNT_NUMBER')&&this.config.get('SEPAY_ACCOUNT_NAME')&&settings.BANKING_ENABLED===true);
+    const bankingReady=sepayConfigured(this.config)&&settings.BANKING_ENABLED===true;
     const usdtReady=Boolean(this.config.get('BINANCE_API_KEY')&&this.config.get('BINANCE_API_SECRET'));
     if(dto.method===DepositMethod.BANKING&&!bankingReady) throw new DomainError('PAYMENT_METHOD_UNAVAILABLE','payment.method_unavailable',409);
+    const accounts=sepayDepositAccounts(this.config);
+    const bank=dto.method===DepositMethod.BANKING
+      ? (dto.bankAccountId?accounts.find(account=>account.id===dto.bankAccountId):accounts.length===1?accounts[0]:undefined)
+      : undefined;
+    if(dto.method===DepositMethod.BANKING&&!bank)throw new DomainError('BANK_ACCOUNT_REQUIRED','payment.bank_account_required',422);
     if(dto.method===DepositMethod.USDT_TRC20&&(!usdtReady||settings.USDT_TRC20_ENABLED!==true)) throw new DomainError('PAYMENT_METHOD_UNAVAILABLE','payment.method_unavailable',409);
     if(dto.method===DepositMethod.USDT_BEP20&&(!usdtReady||settings.USDT_BEP20_ENABLED!==true)) throw new DomainError('PAYMENT_METHOD_UNAVAILABLE','payment.method_unavailable',409);
     const rate=Number(settings.USDT_RATE??0);if(dto.method!==DepositMethod.BANKING&&rate<=0) throw new DomainError('USDT_RATE_UNAVAILABLE','payment.rate_unavailable',409);
@@ -24,16 +30,15 @@ export class PaymentsService {
     const configuredAddress=network?this.config.get<string>(network==='TRX'?'BINANCE_TRC20_ADDRESS':'BINANCE_BEP20_ADDRESS')?.trim():null;
     const address=network==='BSC'?configuredAddress?.toLowerCase():configuredAddress;
     if(network&&!address) throw new DomainError('PAYMENT_METHOD_UNAVAILABLE','payment.address_unavailable',409);
-    const deposit=await this.createRequest(userId,dto,network,address??null,rate,code);
-    return {...deposit,banking:dto.method===DepositMethod.BANKING?{bankName:this.config.get('SEPAY_BANK_NAME')??'',accountNumber:this.config.get('SEPAY_ACCOUNT_NUMBER')??'',accountName:this.config.get('SEPAY_ACCOUNT_NAME')??''}:null};
+    return this.createRequest(userId,dto,network,address??null,rate,code,bank);
   }
-  private async createRequest(userId:string,dto:CreateDepositDto,network:string|null,address:string|null,rate:number,code:string){
+  private async createRequest(userId:string,dto:CreateDepositDto,network:string|null,address:string|null,rate:number,code:string,bank?:SepayBankAccount){
     for(let attempt=0;attempt<12;attempt++){
       const expectedUsdt=network?new Prisma.Decimal(dto.amountVnd).div(rate).toDecimalPlaces(6,Prisma.Decimal.ROUND_UP).add(new Prisma.Decimal(randomInt(1,10000)).div(1_000_000)):null;
       try{
         return await this.prisma.$transaction(async tx=>{
           if(network&&address&&expectedUsdt)await tx.usdtDepositAllocation.create({data:{network,address,amount:expectedUsdt}});
-          return tx.depositRequest.create({data:{publicId:`DEP-${randomUUID().slice(0,8).toUpperCase()}`,userId,method:dto.method,status:'WAITING',requestedVnd:dto.amountVnd,usdtRate:network?rate:null,expectedUsdt,paymentCode:code,network,destinationAddress:address,expiresAt:new Date(Date.now()+30*60_000)}});
+          return tx.depositRequest.create({data:{publicId:`DEP-${randomUUID().slice(0,8).toUpperCase()}`,userId,method:dto.method,status:'WAITING',requestedVnd:dto.amountVnd,usdtRate:network?rate:null,expectedUsdt,paymentCode:code,banking:bank?{...bank}:Prisma.DbNull,network,destinationAddress:address,expiresAt:new Date(Date.now()+30*60_000)}});
         });
       }catch(error){
         if(!(network&&error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2002'))throw error;
@@ -48,9 +53,10 @@ export class PaymentsService {
     let amount:Prisma.Decimal;
     try{amount=new Prisma.Decimal(String(payload.transferAmount??payload.amountIn??payload.amount??'0'));}catch{throw new DomainError('INVALID_WEBHOOK','payment.invalid_webhook',422);}
     if(!externalId||!amount.isFinite()||amount.lte(0))throw new DomainError('INVALID_WEBHOOK','payment.invalid_webhook',422);
-    if(payload.transferType&&payload.transferType!=='in')return {matched:false};
-    const account=this.config.get<string>('SEPAY_ACCOUNT_NUMBER');
-    if(!account||String(payload.accountNumber??'')!==account)return {matched:false};
+    if(payload.transferType!=='in')return {matched:false};
+    const accounts=sepayAccounts(this.config);
+    const receivingBank=accounts.find(account=>matchesSepayBank(account,payload.accountNumber,payload.gateway,payload.subAccount));
+    if(!receivingBank)return {matched:false};
     const match=content.toUpperCase().match(/SVN[A-F0-9]{10}/)?.[0];
     return this.prisma.$transaction(async tx=>{
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'sepay:'+externalId}))`;
@@ -59,7 +65,9 @@ export class PaymentsService {
       const found=match?await tx.depositRequest.findUnique({where:{paymentCode:match}}):null;
       if(found)await tx.$queryRaw`SELECT id FROM "DepositRequest" WHERE id = ${found.id} FOR UPDATE`;
       const deposit=found?await tx.depositRequest.findUnique({where:{id:found.id}}):null;
-      if(!deposit||deposit.method!=='BANKING'||['REJECTED','MANUAL_REVIEW','COMPLETED','OVERPAID'].includes(deposit.status)){
+      const snapshot=deposit?.banking as SepayBankAccount|null|undefined;
+      const bankMatches=snapshot?matchesSepayBank(snapshot,payload.accountNumber,payload.gateway,payload.subAccount):accounts.length===1;
+      if(!deposit||deposit.method!=='BANKING'||!bankMatches||['REJECTED','MANUAL_REVIEW','COMPLETED','OVERPAID'].includes(deposit.status)){
         await tx.paymentTransaction.create({data:{provider:'SEPAY',externalId,amount,rawPayload:payload as Prisma.InputJsonObject,receivedAt:new Date()}});
         return {matched:false};
       }

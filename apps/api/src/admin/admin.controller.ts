@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Put, Post } from "@nestjs/common";
 import { ProviderHealthService } from '../provider/provider-health.service';
+import { sepayConfigured } from '../payments/sepay-config';
 import { Roles } from "../auth/roles.decorator";
 import { PrismaService } from "../prisma/prisma.service";
 import { ServicesService } from "../services/services.service";
@@ -324,11 +325,7 @@ export class AdminController {
           state: provider,
         },
         payments: {
-          sepayConfigured: Boolean(
-            this.config.get("SEPAY_API_TOKEN") &&
-              this.config.get("SEPAY_WEBHOOK_SECRET") &&
-              this.config.get("SEPAY_ACCOUNT_NUMBER"),
-          ),
+          sepayConfigured: sepayConfigured(this.config),
           binanceConfigured: Boolean(
             this.config.get("BINANCE_API_KEY") &&
               this.config.get("BINANCE_API_SECRET"),
@@ -367,13 +364,7 @@ export class AdminController {
         usdtBep20Enabled: values.USDT_BEP20_ENABLED ?? false,
         preventLossSales: values.PREVENT_LOSS_SALES ?? true,
         readiness: {
-          bankingCredentials: Boolean(
-            this.config.get("SEPAY_API_TOKEN") &&
-              this.config.get("SEPAY_WEBHOOK_SECRET") &&
-              this.config.get("SEPAY_BANK_NAME") &&
-              this.config.get("SEPAY_ACCOUNT_NUMBER") &&
-              this.config.get("SEPAY_ACCOUNT_NAME"),
-          ),
+          bankingCredentials: sepayConfigured(this.config),
           usdtCredentials: Boolean(
             this.config.get("BINANCE_API_KEY") &&
               this.config.get("BINANCE_API_SECRET"),

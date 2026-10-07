@@ -309,6 +309,7 @@ model DepositRequest {
   usdtRate Decimal? @db.Decimal(20, 2)
   expectedUsdt Decimal? @db.Decimal(20, 6)
   paymentCode String? @unique
+  banking Json?
   network String?
   destinationAddress String?
   expiresAt DateTime

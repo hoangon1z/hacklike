@@ -42,6 +42,6 @@ export class ProviderHealthService implements OnModuleInit, OnModuleDestroy {
       }
       // Preserve the last known balance and notification incident on failed checks.
       return tx.providerState.upsert({where:{id:'primary'},create:{id:'primary',status,lastCheckedAt:now,...snapshot},update:{status,lastCheckedAt:now,...snapshot}});
-    }, {timeout:20_000});
+    }, {timeout:this.config.get('SMM_PROVIDER_TRANSPORT_URL') ? 60_000 : 20_000});
   }
 }

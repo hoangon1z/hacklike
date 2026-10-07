@@ -222,3 +222,11 @@
 @media(max-width:550px){ .admin-shell .admin-overview-page .stats { grid-template-columns:minmax(0,1fr); } .admin-overview-page .stat { padding:16px; } .admin-overview-page .stat strong { font-size:24px; } }
 @media(max-width:950px){ .admin-shell .settings-form { grid-template-columns:minmax(0,1fr); } .admin-shell .settings-form > section:nth-child(n) { grid-column:auto; grid-row:auto; } .admin-shell .health-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:750px){ .admin-shell .health-grid,.admin-shell .settings-form,.admin-shell .bulk-pricing,.admin-shell .service-filters { grid-template-columns:minmax(0,1fr); } .admin-shell .admin-services-page .service-row { grid-template-columns:repeat(2,minmax(0,1fr)); } .admin-shell .admin-services-page .visibility-cell { grid-column:1; } .admin-shell .admin-services-page .service-actions { grid-column:2; justify-content:flex-end; } .admin-action-dialog .admin-fields { grid-template-columns:minmax(0,1fr); } }
+
+/* Member wallet amounts: fixed table layout, stable digits and compact rows. */
+.admin-member-wallet { font-variant-numeric:tabular-nums; }
+.admin-member-wallet > b,
+.admin-member-wallet > small { display:block; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.admin-member-wallet > b { font-weight:600; }
+.admin-member-wallet > small { font-weight:400; color:#64748b; }
+.admin-vnd-preview { font-size:12px; color:#64748b; font-weight:400; font-variant-numeric:tabular-nums; }

@@ -1,3 +1,6 @@
+import { useDepositMonitor, DepositRecord } from './useDepositMonitor';
+import { depositStatusText, depositNotice } from './depositStatus';
+import {formatVND} from './utils/formatVND';
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { AdminFinanceOverview } from './AdminFinanceOverview';
 import { LandingPage } from './LandingPage';
@@ -41,6 +44,8 @@ import { api, ApiError, errorText, SessionUser } from "./api";
 import { RequiredPasswordChange } from './RequiredPasswordChange';
 import { PageLoader } from './PageLoader';
 import { BrandLogo } from './BrandLogo';
+import { OrderSuccessDialog, NotificationDialog } from './OrderSuccessDialog';
+import { REACTIONS, groupReactionServices, serviceReaction } from './serviceReactions';
 import { DashboardHome, ProfilePage, NotificationsPage, AdminAnnouncements } from "./CustomerPages";
 import { QRCodeSVG } from "qrcode.react";
 import { ManagedUsers, ManagedOrders, ManagedPayments, ManagedAudits } from './AdminManagementPages';
@@ -60,6 +65,7 @@ type Service = {
   systemEnabled?: boolean;
   providerEnabled?: boolean;
   providerType?: string;
+  providerName?: string;
   providerDescription?: string | null;
 };
 type RealOrder = {
@@ -74,7 +80,6 @@ type RealOrder = {
   service: { displayName: string };
   user?: { email: string; displayName: string };
 };
-const money = (v: number) => new Intl.NumberFormat("vi-VN").format(v) + "đ";
 const unitMoney = (v: number) =>
   new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 3 }).format(
     v / 1000,
@@ -115,7 +120,7 @@ function Logo() {
   return (
     <div className="logo">
       <BrandLogo/>
-      <img className="brand-logo-compact" src="/hacklike43-icon-192.png" alt="Hacklike43" width="38" height="38"/>
+      <img className="brand-logo-compact" src="/hacklike43-icon-192.png?v=3" alt="Hacklike43" width="38" height="38"/>
     </div>
   );
 }
@@ -382,10 +387,10 @@ function Shell({
               <Wallet size={16} />
               <span>
                 {user.wallet
-                  ? money(
+                  ? formatVND(
                       Number(user.wallet.balance) - Number(user.wallet.reserved),
                     )
-                  : "0đ"}
+                  : formatVND(0)}
               </span>
               <span className="wallet-add">+</span>
             </NavLink>
@@ -396,7 +401,7 @@ function Shell({
             <NavLink to="/profile" className="mini-avatar" title="Hồ sơ tài khoản">{initials}</NavLink>
           </div>
         </header>
-        {admin ? <AdminRoutes /> : <CustomerRoutes />}
+        {admin ? <AdminRoutes /> : <CustomerRoutes userId={user.id} />}
       </main>
       {open && <div className="backdrop" onClick={() => setOpen(false)} />}
       {confirmLogout && <LogoutConfirmation onClose={() => setConfirmLogout(false)} onConfirm={onLogout}/>}
@@ -404,7 +409,7 @@ function Shell({
   );
 }
 
-function CustomerRoutes() {
+function CustomerRoutes({userId}:{userId:string}) {
   return (
     <Routes>
       <Route path="/dashboard" element={<DashboardHome />} />
@@ -413,7 +418,7 @@ function CustomerRoutes() {
       <Route path="/order" element={<OrderPage />} />
       <Route path="/orders" element={<OrdersPage />} />
       <Route path="/schedule" element={<ScheduledOrdersPage />} />
-      <Route path="/deposit" element={<DepositPage />} />
+      <Route path="/deposit" element={<DepositPage key={userId} userId={userId} />} />
       <Route path="/pricing" element={<Pricing />} />
       <Route path="/support" element={<Support />} />
       <Route path="*" element={<Navigate to="/dashboard" />} />
@@ -496,11 +501,14 @@ function ServiceOrderTabs() {
 
 function OrderPage() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const [submittedOrder, setSubmittedOrder] = useState<{ publicId: string; scheduled: boolean } | null>(null);
   const queryParams = new URLSearchParams(location.search);
   const requestedPlatform = queryParams.get("platform") ?? "";
   const requestedGroup = queryParams.get("group") ?? "";
   const [services, setServices] = useState<Service[]>([]);
   const [serviceId, setServiceId] = useState("");
+  const [confirmedReactionId, setConfirmedReactionId] = useState("");
   const [quantity, setQuantity] = useState(1000);
   const [comments, setComments] = useState("");
   const [link, setLink] = useState("");
@@ -515,6 +523,7 @@ function OrderPage() {
       Array<{
         id: string;
         displayName: string;
+        providerName: string;
         sellingRate: string;
         providerType: string;
         providerDescription: string | null;
@@ -526,6 +535,7 @@ function OrderPage() {
       const mapped = rows.map((x) => ({
         id: x.id,
         name: x.displayName,
+        providerName: x.providerName,
         platform: x.category.name,
         price: Number(x.sellingRate),
         providerType: x.providerType,
@@ -553,14 +563,19 @@ function OrderPage() {
       servicePlatform(s) === requestedPlatform &&
       s.platform === requestedGroup && s.enabled,
   );
+  const serviceGroups = groupReactionServices(filtered);
   useEffect(() => {
     setServiceId((current) =>
       filtered.some((x) => String(x.id) === current)
         ? current
-        : String(filtered[0]?.id ?? ""),
+        : String(serviceGroups[0]?.variants[0]?.id ?? ""),
     );
   }, [requestedPlatform, requestedGroup, services]);
   const selected = filtered.find((x) => String(x.id) === serviceId);
+  const selectedGroup = serviceGroups.find(group => group.variants.some(service => String(service.id) === serviceId));
+  const reaction = selected ? serviceReaction(selected) : null;
+  const validReaction = !reaction || confirmedReactionId === serviceId;
+  const reactionDetails = REACTIONS.find(item => item.code === reaction);
   const customComments = selected?.providerType === "Custom Comments";
   const commentLines = comments.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   const orderQuantity = customComments ? commentLines.length : quantity;
@@ -581,10 +596,13 @@ function OrderPage() {
       new Date(scheduledAt).getTime() >= Date.now() + 30_000);
   const total = selected ? (selected.price * orderQuantity) / 1000 : 0;
   async function submit() {
-    if (!selected || !validLink || !validQuantity || !validSchedule) {
+    if (busy) return;
+    if (!selected || !validLink || !validQuantity || !validSchedule || !validReaction) {
       setFeedbackError(true);
       setFeedback(
-        !validLink
+        !validReaction
+          ? "Vui lòng chọn cảm xúc trước khi đặt đơn."
+          : !validLink
           ? "Đường dẫn phải bắt đầu bằng http:// hoặc https://."
           : !validQuantity
             ? "Số lượng chưa nằm trong giới hạn của dịch vụ."
@@ -609,11 +627,8 @@ function OrderPage() {
             : undefined,
         }),
       });
-      setFeedback(
-        scheduleEnabled
-          ? `Đã tạo lịch ${order.publicId}. Tiền đã được giữ và đơn sẽ chạy đúng thời gian đã chọn.`
-          : `Đã tiếp nhận đơn ${order.publicId}. Bạn có thể theo dõi trong mục Đơn hàng.`,
-      );
+      setSubmittedOrder({ publicId: order.publicId, scheduled: scheduleEnabled });
+      setConfirmedReactionId("");
       setLink("");
       setComments("");
     } catch (e) {
@@ -636,6 +651,15 @@ function OrderPage() {
   }
   return (
     <div className="page order-page">
+      {submittedOrder && <OrderSuccessDialog
+        publicId={submittedOrder.publicId}
+        scheduled={submittedOrder.scheduled}
+        onClose={() => setSubmittedOrder(null)}
+        onViewOrders={() => {
+          setSubmittedOrder(null);
+          navigate(`${submittedOrder.scheduled ? '/schedule' : '/orders'}${location.search}`);
+        }}
+      />}
       <PageHead
         eyebrow="ĐƠN HÀNG"
         title={requestedGroup || "Tạo đơn mới"}
@@ -644,10 +668,14 @@ function OrderPage() {
       <ServiceOrderTabs />
       <div className="form-layout order-layout">
         <section className="card form-card">
-          <div className="order-section-title"><b>1. Chọn dịch vụ</b><span>{filtered.length} dịch vụ</span></div>
+          <div className="order-section-title"><b>1. Chọn dịch vụ</b><span>{serviceGroups.length} dịch vụ</span></div>
           <div className="order-service-options">
-            {filtered.map((service) => {
-              const checked = String(service.id) === serviceId;
+            {serviceGroups.map((group) => {
+              const checked = group.variants.some(service => String(service.id) === serviceId);
+              const service = (checked ? selected : undefined) ?? group.variants[0];
+              const hasReactions = Boolean(serviceReaction(service));
+              const minimumPrice = Math.min(...group.variants.map(variant => variant.price));
+              const priceVaries = group.variants.some(variant => variant.price !== minimumPrice);
               return (
                 <label
                   className={
@@ -655,26 +683,25 @@ function OrderPage() {
                       ? "order-service-option selected"
                       : "order-service-option"
                   }
-                  key={service.id}
+                  key={group.key}
                 >
                   <input
                     type="radio"
                     name="service"
                     checked={checked}
-                    onChange={() => setServiceId(String(service.id))}
+                    onChange={() => { setServiceId(String(group.variants[0].id)); setConfirmedReactionId(""); }}
                   />
                   <span className="service-radio" />
                   <span className="order-service-copy">
-                    <b>{service.name}</b>
+                    <b>{group.name}</b>
                     <small>{service.platform}</small>
                     <small>
-                      Giới hạn {service.min.toLocaleString("vi-VN")} –{" "}
-                      {service.max.toLocaleString("vi-VN")}
+                      {hasReactions ? `${group.variants.length} cảm xúc · Chọn bên dưới` : `Giới hạn ${service.min.toLocaleString("vi-VN")} – ${service.max.toLocaleString("vi-VN")}`}
                     </small>
                   </span>
                   <span className="order-service-price">
-                    <b>{unitMoney(service.price)}</b>
-                    <small>{money(service.price)} / 1.000</small>
+                    <b>{priceVaries ? 'Từ ' : ''}{unitMoney(minimumPrice)}</b>
+                    <small>{priceVaries ? 'Từ ' : ''}{formatVND(minimumPrice)} / 1.000</small>
                   </span>
                 </label>
               );
@@ -685,6 +712,24 @@ function OrderPage() {
               </div>
             )}
           </div>
+          {reaction && selectedGroup && <fieldset className="order-reactions" disabled={busy}>
+            <legend>Chọn cảm xúc <span>(bắt buộc)</span></legend>
+            <p>Chọn cảm xúc bạn muốn tăng cho bài viết. Giá và giới hạn áp dụng theo lựa chọn.</p>
+            <div className="order-reaction-options">
+              {selectedGroup.variants.map(variant => {
+                const option = REACTIONS.find(item => item.code === serviceReaction(variant));
+                if (!option) return null;
+                const checked = confirmedReactionId === String(variant.id) && serviceId === String(variant.id);
+                return <label key={variant.id} className={`order-reaction-option${checked ? ' selected' : ''}`}>
+                  <input type="radio" name="reaction" value={option.code} checked={checked}
+                    onChange={() => { setServiceId(String(variant.id)); setConfirmedReactionId(String(variant.id)); }}/>
+                  <span className="order-reaction-emoji" aria-hidden="true">{option.emoji}</span>
+                  <span>{option.label}</span>
+                </label>;
+              })}
+            </div>
+            {!validReaction && <small>Vui lòng chọn một cảm xúc để tiếp tục.</small>}
+          </fieldset>}
           <div className="order-section-title"><b>2. Thông tin đơn hàng</b></div>
           <label>{customComments ? "Link bài viết / video cần bình luận" : "Đường dẫn bài viết / video / tài khoản"}</label>
           <input
@@ -766,11 +811,12 @@ function OrderPage() {
             <div className="order-review-heading">
               <div>
                 <small>3. KIỂM TRA & XÁC NHẬN</small>
-                <b>{selected?.name ?? "Chưa chọn dịch vụ"}</b>
+                <b>{selectedGroup?.name ?? "Chưa chọn dịch vụ"}</b>
               </div>
-              <div className="order-total-highlight"><small>TỔNG THANH TOÁN</small><strong>{selected && validQuantity ? money(total) : "—"}</strong></div>
+              <div className="order-total-highlight"><small>TỔNG THANH TOÁN</small><strong>{selected && validQuantity && validReaction ? formatVND(total) : "—"}</strong></div>
             </div>
             <div className="order-review-details">
+              {reactionDetails && <span>Cảm xúc <b>{validReaction ? `${reactionDetails.emoji} ${reactionDetails.label}` : 'Chưa chọn'}</b></span>}
               <span>
                 Đơn giá <b>{selected ? unitMoney(selected.price) : "—"}</b>
               </span>
@@ -795,6 +841,7 @@ function OrderPage() {
                 !validLink ||
                 !validQuantity ||
                 !validSchedule ||
+                !validReaction ||
                 busy
               }
               onClick={submit}
@@ -923,7 +970,7 @@ function RealOrderTable({
               </td>
               <td>{o.quantity.toLocaleString("vi-VN")}</td>
               <td>
-                <b>{money(Number(o.chargeAmount))}</b>
+                <b>{formatVND(Number(o.chargeAmount))}</b>
               </td>
             </tr>
           ))}
@@ -1039,7 +1086,7 @@ function OrdersPage() {
                   </td>
                   <td>{o.quantity.toLocaleString("vi-VN")}</td>
                   <td>
-                    <b>{money(Number(o.chargeAmount))}</b>
+                    <b>{formatVND(Number(o.chargeAmount))}</b>
                   </td>
                 </tr>
               ))}
@@ -1129,7 +1176,7 @@ function ScheduledOrdersPage() {
                     </b>
                   </td>
                   <td>{order.quantity.toLocaleString("vi-VN")}</td>
-                  <td>{money(Number(order.chargeAmount))}</td>
+                  <td>{formatVND(Number(order.chargeAmount))}</td>
                   <td>
                     <span className="status warning">
                       <i />
@@ -1176,6 +1223,7 @@ function ScheduledOrdersPage() {
 
 type Capabilities = {
   banking: boolean;
+  bankAccounts?: Array<{ id: string; bankName: string; last4: string }>;
   usdt: boolean;
   usdtTrc20?: boolean;
   usdtBep20?: boolean;
@@ -1183,21 +1231,7 @@ type Capabilities = {
   telegram: unknown;
   fanpage: unknown;
 };
-type DepositInstruction = {
-  publicId: string;
-  method: string;
-  requestedVnd: string;
-  expectedUsdt: string | null;
-  paymentCode: string;
-  network: string | null;
-  destinationAddress: string | null;
-  expiresAt: string;
-  banking: null | {
-    bankName: string;
-    accountNumber: string;
-    accountName: string;
-  };
-};
+type DepositInstruction = DepositRecord;
 function PaymentInstructions({ request }: { request: DepositInstruction }) {
   const [copyMessage, setCopyMessage] = useState("");
   const [qrFailed, setQrFailed] = useState(false);
@@ -1209,13 +1243,13 @@ function PaymentInstructions({ request }: { request: DepositInstruction }) {
   const banking = request.method === "BANKING";
   const expired = now >= new Date(request.expiresAt).getTime();
   const networkLabel = request.network === "TRX" ? "TRON (TRC20)" : request.network === "BSC" ? "BNB Smart Chain (BEP20)" : request.network;
-  const qrParams = request.banking ? new URLSearchParams({ acc: request.banking.accountNumber, bank: request.banking.bankName, amount: request.requestedVnd, des: request.paymentCode, template: "qronly" }) : null;
+  const qrParams = request.banking ? new URLSearchParams({ acc: request.banking.virtualAccountNumber || request.banking.accountNumber, bank: request.banking.bankName, amount: request.requestedVnd, des: request.paymentCode, template: "qronly" }) : null;
   async function copy(value: string, label: string) {
     try { await navigator.clipboard.writeText(value); setCopyMessage(`Đã sao chép ${label}.`); }
     catch { setCopyMessage("Chưa thể sao chép tự động. Bạn có thể chọn và sao chép thông tin bên dưới."); }
   }
   function copyField(label: string, value: string, highlight = false) {
-    return <div className={highlight ? "payment-copy-field highlight" : "payment-copy-field"}><div><small>{label}</small><b>{value}</b></div><button type="button" className="payment-copy-button" onClick={() => copy(value, label.toLowerCase())} aria-label={`Sao chép ${label.toLowerCase()}`}><Copy size={16}/></button></div>;
+    return <div className={highlight ? "payment-copy-field highlight" : "payment-copy-field"}><div><small>{label}</small><b>{highlight && banking ? formatVND(Number(value)) : value}</b></div><button type="button" className="payment-copy-button" onClick={() => copy(value, label.toLowerCase())} aria-label={`Sao chép ${label.toLowerCase()}`}><Copy size={16}/></button></div>;
   }
   return <section className="payment-instruction">
     <div className="payment-instruction-heading"><h3>{banking ? "Quét QR để chuyển khoản" : "Quét QR địa chỉ nhận USDT"}</h3><span className="payment-network-badge">{banking ? "Banking" : networkLabel}</span></div>
@@ -1223,8 +1257,8 @@ function PaymentInstructions({ request }: { request: DepositInstruction }) {
       {expired ? <div className="payment-qr-unavailable">Yêu cầu đã hết hạn. Vui lòng tạo yêu cầu mới trước khi chuyển tiền.</div> : banking && qrParams ? qrFailed ? <div className="payment-qr-unavailable">Chưa tải được QR. Bạn có thể chuyển khoản bằng thông tin bên cạnh.<button className="secondary" onClick={() => setQrFailed(false)}>Tải lại QR</button></div> : <img src={`https://vietqr.app/img?${qrParams}`} alt="QR ngân hàng chứa tài khoản, số tiền và nội dung chuyển khoản" width={220} height={220} referrerPolicy="no-referrer" onError={() => setQrFailed(true)}/> : request.destinationAddress ? <QRCodeSVG value={request.destinationAddress} size={220} level="M" marginSize={4} title={`QR địa chỉ nhận USDT trên ${networkLabel}`}/> : <p>Chưa có thông tin QR.</p>}
       <small>{banking ? "Mở ứng dụng ngân hàng để quét mã." : "QR chỉ chứa địa chỉ ví, không tự điền số tiền hoặc chọn mạng."}</small>
     </div><div className="payment-transfer-details">
-      {request.banking && <>{copyField("Ngân hàng", request.banking.bankName)}{copyField("Số tài khoản", request.banking.accountNumber)}{copyField("Chủ tài khoản", request.banking.accountName)}{copyField("Số tiền chuyển (VND)", request.requestedVnd, true)}{copyField("Nội dung chuyển khoản", request.paymentCode)}</>}
-      {!banking && request.destinationAddress && <>{copyField("Mạng nhận USDT", networkLabel ?? "")}{copyField("Địa chỉ ví nhận", request.destinationAddress)}{copyField("Số USDT cần nhận chính xác", request.expectedUsdt ?? "", true)}<div className="payment-credit-summary">Số dư được cộng: <b>{money(Number(request.requestedVnd))}</b></div></>}
+      {request.banking && <>{copyField("Ngân hàng", request.banking.bankName)}{copyField("Số tài khoản", request.banking.virtualAccountNumber || request.banking.accountNumber)}{copyField("Chủ tài khoản", request.banking.accountName)}{copyField("Số tiền chuyển (VND)", request.requestedVnd, true)}{copyField("Nội dung chuyển khoản", request.paymentCode)}</>}
+      {!banking && request.destinationAddress && <>{copyField("Mạng nhận USDT", networkLabel ?? "")}{copyField("Địa chỉ ví nhận", request.destinationAddress)}{copyField("Số USDT cần nhận chính xác", request.expectedUsdt ?? "", true)}<div className="payment-credit-summary">Số dư được cộng: <b>{formatVND(Number(request.requestedVnd))}</b></div></>}
       <small className="payment-expiry">{expired ? "Đã hết hạn" : "Hết hạn lúc"}: {new Date(request.expiresAt).toLocaleString("vi-VN")}</small>
     </div></div>
     {!banking && <div className="notice">Chuyển USDT không cần nội dung hoặc mã nạp. Sau khi quét QR, hãy chọn đúng {networkLabel} và nhập toàn bộ số USDT hiển thị, kể cả phần thập phân. Thanh toán phí riêng để số tiền nhận không bị thiếu. Không dùng lại yêu cầu này cho lần nạp khác.</div>}
@@ -1232,50 +1266,95 @@ function PaymentInstructions({ request }: { request: DepositInstruction }) {
   </section>;
 }
 
-function DepositPage() {
+function DepositPage({userId}:{userId:string}) {
+  const monitor = useDepositMonitor(userId);
+  const [initialized,setInitialized] = useState(false);
+  const restoredOnce=useRef(false), submitGuard=useRef(false);
+  const preparedKey=useRef("");
+  const preparedRequest=useRef<DepositRecord|null>(null);
+  const [bankAccountId, setBankAccountId] = useState("");
   const [method, setMethod] = useState<"BANKING" | "USDT_TRC20" | "USDT_BEP20">(
     "BANKING",
   );
   const [amount, setAmount] = useState(100000);
   const [caps, setCaps] = useState<Capabilities | null>(null);
+  const [capsRevision,setCapsRevision]=useState(0);
   const [result, setResult] = useState<DepositInstruction | null>(null);
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resultKey, setResultKey] = useState("");
+  const [retry, setRetry] = useState(0);
+  const selectionKey = `${method}:${bankAccountId}:${amount}`;
+  const validAmount = Number.isInteger(amount) && amount >= 10000 && amount <= 1000000000;
+  useEffect(() => {
+    if(!caps || !monitor.ready || restoredOnce.current)return;
+    restoredOnce.current=true;
+    const restored=monitor.restored;
+    const request=restored?.method==="BANKING"&&!caps.bankAccounts?.some(bank=>bank.id===restored.banking?.id)?null:restored;
+    if(request){
+      const bank=request.banking?.id??caps.bankAccounts?.[0]?.id??"";
+      setMethod(request.method);setAmount(Number(request.requestedVnd));setBankAccountId(bank);
+      preparedRequest.current=request;setResult(request);setResultKey(`${request.method}:${bank}:${Number(request.requestedVnd)}`);
+      preparedKey.current=`${request.method}:${bank}:${Number(request.requestedVnd)}:0`;
+    }
+    setInitialized(true);
+  },[caps,monitor.ready,monitor.restored]);
+  useEffect(() => {
+    if (!initialized) return;
+    if (preparedKey.current === `${selectionKey}:${retry}`) { setResult(preparedRequest.current);setResultKey(selectionKey);setBusy(false);return; }
+    if (method !== "BANKING" || !caps?.banking || !bankAccountId || !validAmount) { setBusy(false); return; }
+    let active = true;
+    setResult(null);
+    setFeedback("");
+    setBusy(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const request = await api<DepositInstruction>("/payments/deposits", {
+          method: "POST", body: JSON.stringify({ method: "BANKING", amountVnd: amount, bankAccountId }),
+        });
+        monitor.track(request);
+        if (active) { preparedRequest.current=request;preparedKey.current=`${selectionKey}:${retry}`;setResult(request); setResultKey(selectionKey); }
+      } catch (e) {
+        if (active) setFeedback(errorText(e instanceof ApiError ? e.code : "INTERNAL_ERROR"));
+      } finally { if (active) setBusy(false); }
+    }, 700);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [method, caps, bankAccountId, amount, validAmount, selectionKey, retry, initialized, monitor.track]);
   useEffect(() => {
     api<Capabilities>("/health/capabilities").then((c) => {
       setCaps(c);
+      setBankAccountId(c.bankAccounts?.[0]?.id ?? "");
       if (!c.banking) setMethod(c.usdtTrc20 ? "USDT_TRC20" : "USDT_BEP20");
-    });
-  }, []);
+    }).catch(()=>setFeedback("Không thể tải phương thức nạp tiền. Vui lòng thử lại."));
+  }, [capsRevision]);
   async function create() {
-    setBusy(true);
-    setFeedback("");
+    if (submitGuard.current || busy || !initialized || !validAmount || (current && resultKey===selectionKey && !terminal && current.status!=="EXPIRED")) return;
+    submitGuard.current=true;setBusy(true);setFeedback("");
     try {
-      setResult(
-        await api<DepositInstruction>("/payments/deposits", {
-          method: "POST",
-          body: JSON.stringify({ method, amountVnd: amount }),
-        }),
-      );
-    } catch (e) {
-      setFeedback(errorText(e instanceof ApiError ? e.code : "INTERNAL_ERROR"));
-    } finally {
-      setBusy(false);
-    }
+      const request=await api<DepositInstruction>("/payments/deposits", {
+        method:"POST",body:JSON.stringify({method,amountVnd:amount,...(method==='BANKING'?{bankAccountId}:{})}),
+      });
+      monitor.track(request);setResult(request);setResultKey(selectionKey);
+    } catch(e) {
+      setFeedback(errorText(e instanceof ApiError?e.code:"INTERNAL_ERROR"));
+    } finally {submitGuard.current=false;setBusy(false);}
   }
+  const current=result?(monitor.rows.find(row=>row.publicId===result.publicId)??result):null;
+  const terminal=current?depositNotice(current):null;
   if (!caps)
     return (
-      <div className="page">
+      <div className="page deposit-page">
         <PageHead
           eyebrow="TÀI CHÍNH"
           title="Nạp tiền"
           desc="Đang tải phương thức nạp tiền…"
         />
+        {feedback&&<div className="form-error" role="alert">{feedback}<button className="secondary" onClick={()=>{setFeedback("");setCapsRevision(x=>x+1);}}>Thử lại</button></div>}
       </div>
     );
   if (!caps.banking && !caps.usdt)
     return (
-      <div className="page">
+      <div className="page deposit-page">
         <PageHead
           eyebrow="TÀI CHÍNH"
           title="Nạp tiền"
@@ -1289,20 +1368,20 @@ function DepositPage() {
       </div>
     );
   return (
-    <div className="page">
+    <div className="page deposit-page">
       <PageHead
         eyebrow="TÀI CHÍNH"
         title="Nạp tiền"
-        desc="Chọn phương thức phù hợp để nạp thêm số dư."
+        desc="Chọn số tiền. Quét QR để nạp vào ví."
       />
-      <div className="deposit-layout">
-        <section className="card form-card">
-          <div className="tabs">
+      <div className="deposit-layout deposit-redesign">
+        <section className="deposit-controls">
+          <div className="deposit-panel-heading"><span className="deposit-heading-icon"><Wallet size={20}/></span><div><h2>Thông tin nạp tiền</h2><p>Chọn số tiền muốn nạp.</p></div></div>
+          {(Number(caps.banking) + Number(Boolean(caps.usdtTrc20)) + Number(Boolean(caps.usdtBep20))) > 1 && <div className="tabs">
             {caps.banking && (
               <button
                 onClick={() => {
-                  setMethod("BANKING");
-                  setResult(null);
+                  if (method !== "BANKING") { setMethod("BANKING"); setResult(null); }
                 }}
                 className={method === "BANKING" ? "active" : ""}
               >
@@ -1312,8 +1391,7 @@ function DepositPage() {
             {caps.usdtTrc20 && (
               <button
                 onClick={() => {
-                  setMethod("USDT_TRC20");
-                  setResult(null);
+                  if(method!=="USDT_TRC20"){setMethod("USDT_TRC20");setResult(null);}
                 }}
                 className={method === "USDT_TRC20" ? "active" : ""}
               >
@@ -1323,55 +1401,86 @@ function DepositPage() {
             {caps.usdtBep20 && (
               <button
                 onClick={() => {
-                  setMethod("USDT_BEP20");
-                  setResult(null);
+                  if(method!=="USDT_BEP20"){setMethod("USDT_BEP20");setResult(null);}
                 }}
                 className={method === "USDT_BEP20" ? "active" : ""}
               >
                 USDT BEP20
               </button>
             )}
-          </div>
-          <label>Số tiền muốn nạp (VND)</label>
+          </div>}
+          {method === 'BANKING' && (caps.bankAccounts?.length??0)>1 && <>
+            <h2 className="deposit-step"><span>1</span> Chọn ngân hàng</h2>
+            <div className="deposit-bank-options" role="group" aria-label="Ngân hàng nhận tiền">
+              {caps.bankAccounts?.map(account => <button type="button" key={account.id}
+                aria-pressed={bankAccountId === account.id}
+                className={bankAccountId === account.id ? "deposit-bank selected" : "deposit-bank"}
+                onClick={() => setBankAccountId(account.id)}>
+                <span className={account.bankName.toLowerCase().includes("kien") ? "deposit-bank-symbol klb" : "deposit-bank-symbol mb"}>{account.bankName.toLowerCase().includes("kien") ? "K" : "MB"}</span><strong>{account.bankName === "KienLongBank" ? "KienlongBank" : account.bankName}</strong><span className="deposit-bank-radio" aria-hidden="true"/>
+              </button>)}
+            </div>
+          </>}
+          <h2 className="deposit-step">Chọn số tiền</h2>
           <div className="amount-presets">
             {[50000, 100000, 200000, 500000, 1000000, 2000000].map((preset) => (
               <button
                 type="button"
                 key={preset}
+                aria-pressed={amount === preset}
                 className={amount === preset ? "selected" : ""}
                 onClick={() => setAmount(preset)}
               >
-                {money(preset)}
+                {formatVND(preset)}
               </button>
             ))}
           </div>
-          <input
+          <label htmlFor="deposit-amount">Hoặc nhập số tiền khác (VND)</label>
+          <div className="deposit-amount-input"><input
+            id="deposit-amount"
             className="input"
             type="number"
             min="10000"
+            max="1000000000"
+            inputMode="numeric"
+            aria-describedby="deposit-amount-help"
+            aria-invalid={!validAmount}
             step="10000"
             value={amount}
             onChange={(e) => setAmount(Number(e.target.value))}
-          />
-          <button
+          /><span>VND</span></div>
+          <p id="deposit-amount-help" className="deposit-amount-help">Tối thiểu {formatVND(10000)}</p>
+          {method !== "BANKING" && <button
             className="primary wide"
-            disabled={busy || amount < 10000}
+            disabled={busy || !validAmount || !initialized || Boolean(current && resultKey===selectionKey && !terminal && current.status!=="EXPIRED")}
             onClick={create}
           >
             {busy ? "Đang tạo…" : "Tạo yêu cầu nạp"}
-          </button>
+          </button>}
           {feedback && <div className="form-error">{feedback}</div>}
-          {result && <PaymentInstructions key={result.publicId} request={result}/>}
+          {!validAmount && <p className="form-error">Nhập số tiền từ 10.000 đến 1.000.000.000 VND, không có phần thập phân.</p>}
+          {method === "BANKING" && <div className="deposit-helper"><RefreshCw size={16}/><p>QR tự cập nhật khi bạn thay đổi số tiền.</p></div>}
         </section>
-        <aside className="card summary">
-          <h2>Lưu ý</h2>
-          <ul>
-            <li>Chỉ thanh toán theo yêu cầu vừa tạo.</li>
-            {method === "BANKING" ? <li>Ghi chính xác nội dung chuyển khoản hoặc quét QR ngân hàng.</li> : <><li>USDT không cần nội dung chuyển khoản. QR chỉ chứa địa chỉ ví.</li><li>Chọn đúng mạng và chuyển chính xác số USDT, gồm toàn bộ phần thập phân.</li></>}
-            <li>Số dư tự cập nhật sau khi giao dịch được xác nhận.</li>
-          </ul>
+        <aside className="deposit-payment" aria-label="Thông tin chuyển khoản">
+          <div className="deposit-panel-heading"><span className="deposit-heading-icon"><CreditCard size={20}/></span><div><h2>Quét mã để nạp tiền</h2><p>Mở ứng dụng ngân hàng và quét mã bên dưới.</p></div></div>
+          {monitor.error && <div className="form-error" role="alert">{monitor.error}<button className="secondary" disabled={monitor.checking} onClick={monitor.retry}>Thử lại</button></div>}
+          {current && resultKey === selectionKey && <div className="deposit-status" role="status">
+            {!terminal && !monitor.error && <RefreshCw size={16} className="deposit-spinner"/>}
+            <span><b>{depositStatusText(current.status)}</b><small>{current.publicId}{current.creditedVnd?` · Đã cộng: ${formatVND(current.creditedVnd)}`:''}</small></span>
+          </div>}
+          {current && resultKey === selectionKey && !busy ? <>
+            {!terminal && current.status!=="EXPIRED" && <PaymentInstructions key={current.publicId} request={current}/>}
+            {method === "BANKING" && <button className="deposit-refresh" disabled={busy || !initialized} onClick={() => setRetry(value => value + 1)}><RefreshCw size={14}/> Tạo mã QR mới</button>}
+          </> : <div className="deposit-qr-placeholder" role="status"><RefreshCw size={32} className={busy?"deposit-spinner":""}/><strong>{!initialized ? "Đang kiểm tra giao dịch trước đó…" : !validAmount ? "Nhập số tiền hợp lệ để hiện QR" : feedback ? "Chưa tạo được mã QR" : method === "BANKING" ? "Đang chuẩn bị mã QR…" : "Chọn số tiền và tạo yêu cầu nạp"}</strong>
+            {feedback && method === "BANKING" && <button className="secondary" onClick={() => setRetry(value => value + 1)}>Thử lại</button>}
+          </div>}
+          <div className="deposit-note"><Info size={17}/><p>{method === "BANKING" ? "Quét mã bằng ứng dụng ngân hàng, giữ nguyên số tiền và nội dung chuyển khoản." : "Chọn đúng mạng và chuyển chính xác số USDT hiển thị."} Số dư được cộng sau khi giao dịch được xác nhận.</p></div>
         </aside>
       </div>
+      {monitor.rows.length>0 && <section className="card deposit-history"><h2>Lịch sử nạp tiền gần đây</h2><div className="table-wrap"><table><thead><tr><th>Mã giao dịch</th><th>Số tiền</th><th>Đã cộng</th><th>Trạng thái</th></tr></thead><tbody>{monitor.rows.map(row=><tr key={row.publicId}><td>{row.publicId}</td><td>{formatVND(row.requestedVnd)}</td><td>{formatVND(row.creditedVnd)}</td><td>{depositStatusText(row.status)}</td></tr>)}</tbody></table></div></section>}
+      {monitor.notice && <NotificationDialog key={monitor.notice.id} title={monitor.notice.title} kind={monitor.notice.kind} autoCloseMs={4000} onClose={monitor.dismiss}>
+        {monitor.notice.kind==='success'?<><p>Số tiền: <strong>{formatVND(monitor.notice.request.creditedVnd)}</strong></p>{monitor.notice.request.status==='OVERPAID'&&<p>Phần chuyển dư cần được đối soát riêng.</p>}</>:<p>{monitor.notice.kind==='error'?'Yêu cầu đã bị từ chối hoặc thanh toán không thành công. Liên hệ hỗ trợ nếu bạn đã chuyển tiền.':'Yêu cầu thanh toán đã bị hủy.'}</p>}
+        <p>{monitor.notice.request.publicId}</p>
+      </NotificationDialog>}
     </div>
   );
 }
@@ -1428,7 +1537,7 @@ function Pricing() {
                   </td>
                   <td>{s.platform}</td>
                   <td>
-                    <b>{money(s.price)}</b>
+                    <b>{formatVND(s.price)}</b>
                   </td>
                   <td>{s.min.toLocaleString("vi-VN")}</td>
                   <td>{s.max.toLocaleString("vi-VN")}</td>
@@ -1579,7 +1688,7 @@ function AdminDashboard() {
           label="Số dư nhà cung cấp"
           value={
             data?.provider
-              ? `${new Intl.NumberFormat("vi-VN").format(Number(data.provider.balance))} ${data.provider.currency}`
+              ? (data.provider.currency === "VND" ? formatVND(data.provider.balance) : `${new Intl.NumberFormat("vi-VN").format(Number(data.provider.balance))} ${data.provider.currency}`)
               : "—"
           }
           delta={
@@ -1636,7 +1745,7 @@ function AdminDashboard() {
             <small>SỐ DƯ GẦN NHẤT</small>
             <strong>
               {data?.provider
-                ? `${new Intl.NumberFormat("vi-VN").format(Number(data.provider.balance))} ${data.provider.currency}`
+                ? (data.provider.currency === "VND" ? formatVND(data.provider.balance) : `${new Intl.NumberFormat("vi-VN").format(Number(data.provider.balance))} ${data.provider.currency}`)
                 : "Chưa có dữ liệu"}
             </strong>
             <p>
@@ -1751,13 +1860,13 @@ function AdminServices() {
                       #{s.id} · {s.platform}
                     </small>
                   </td>
-                  <td>{money(s.providerRate ?? 0)}</td>
+                  <td>{formatVND(s.providerRate ?? 0)}</td>
                   <td>
-                    <b>{money(s.price)}</b>
+                    <b>{formatVND(s.price)}</b>
                   </td>
                   <td>
                     <span className="profit">
-                      {money(s.price - (s.providerRate ?? 0))}
+                      {formatVND(s.price - (s.providerRate ?? 0))}
                     </span>
                   </td>
                   <td>
@@ -2030,18 +2139,18 @@ function AdminServicesEditor() {
               </div>
               <div className="price-stack">
                 <small>Giá vốn / 1.000</small>
-                <b>{money(s.providerRate ?? 0)}</b>
+                <b>{formatVND(s.providerRate ?? 0)}</b>
               </div>
               <div className="price-stack">
-                <b>{money(s.price)}</b>
+                <b>{formatVND(s.price)}</b>
                 <small className="profit">
-                  Lãi {money(s.price - (s.providerRate ?? 0))}
+                  Lãi {formatVND(s.price - (s.providerRate ?? 0))}
                 </small>
                 <small>
                   {s.pricingMode === "PERCENTAGE"
                     ? `Cộng ${s.markupValue}%`
                     : s.pricingMode === "FIXED_MARKUP"
-                      ? `Cộng ${money(s.markupValue ?? 0)}`
+                      ? `Cộng ${formatVND(s.markupValue ?? 0)}`
                       : `Giá cố định`}{" "}
                   · Biên ≥ {s.minimumSafeMargin}%
                 </small>
@@ -2086,8 +2195,8 @@ function AdminServicesEditor() {
             <div className="guide-item">
               <b>Cộng theo phần trăm</b>
               <p>
-                Giá bán = giá vốn + phần trăm. Ví dụ vốn 10.000đ, cộng 20% thì
-                bán 12.000đ.
+                Giá bán = giá vốn + phần trăm. Ví dụ vốn {formatVND(10000)}, cộng 20% thì
+                bán {formatVND(12000)}.
               </p>
             </div>
             <div className="guide-item">
@@ -2141,7 +2250,7 @@ function AdminServicesEditor() {
             <h2>{editing.name}</h2>
             <div className="edit-price-summary">
               <span>Giá vốn / 1.000</span>
-              <b>{money(editing.providerRate ?? 0)}</b>
+              <b>{formatVND(editing.providerRate ?? 0)}</b>
             </div>
             <label>Cách tính giá bán</label>
             <select
@@ -2189,7 +2298,7 @@ function AdminServicesEditor() {
             />
             <div className="edit-price-preview">
               <span>Giá bán hiện tại</span>
-              <b>{money(editing.price)}</b>
+              <b>{formatVND(editing.price)}</b>
               <small>Giá mới được tính sau khi lưu.</small>
             </div>
             <button
@@ -2650,11 +2759,11 @@ function AdminServicesAdvanced() {
               <div className="price-stack">
                 <small>Giá vốn mỗi lượt</small>
                 <b>{unitMoney(service.providerRate ?? 0)}</b>
-                <small>{money(service.providerRate ?? 0)} / 1.000 lượt</small>
+                <small>{formatVND(service.providerRate ?? 0)} / 1.000 lượt</small>
               </div>
               <div className="price-stack">
                 <b>{unitMoney(service.price)}</b>
-                <small>{money(service.price)} / 1.000 lượt</small>
+                <small>{formatVND(service.price)} / 1.000 lượt</small>
                 <small className="profit">
                   Lãi {unitMoney(service.price - (service.providerRate ?? 0))}
                 </small>
@@ -2662,7 +2771,7 @@ function AdminServicesAdvanced() {
                   {service.pricingMode === "PERCENTAGE"
                     ? `Cộng ${service.markupValue}%`
                     : service.pricingMode === "FIXED_MARKUP"
-                      ? `Cộng ${money(service.markupValue ?? 0)}`
+                      ? `Cộng ${formatVND(service.markupValue ?? 0)}`
                       : "Giá cố định"}{" "}
                   · Biên ≥ {service.minimumSafeMargin}%
                 </small>
@@ -2705,9 +2814,8 @@ function AdminServicesAdvanced() {
             <div className="guide-item">
               <b>Giá vốn / 1.000 là gì?</b>
               <p>
-                Là số tiền web trả cho site mẹ khi mua 1.000 lượt. Ví dụ 16.450đ
-                / 1.000 tương đương 16,45đ mỗi lượt; mua 2.000 lượt có vốn
-                32.900đ.
+                Là số tiền web trả cho site mẹ khi mua 1.000 lượt. Ví dụ {formatVND(16450)}
+                / 1.000 lượt; mua 2.000 lượt có vốn {formatVND(32900)}.
               </p>
             </div>
             <div className="guide-item">
@@ -2751,7 +2859,7 @@ function AdminServicesAdvanced() {
             <div className="edit-price-summary">
               <span>Giá vốn mỗi lượt</span>
               <b>{unitMoney(editing.providerRate ?? 0)}</b>
-              <small>{money(editing.providerRate ?? 0)} / 1.000 lượt</small>
+              <small>{formatVND(editing.providerRate ?? 0)} / 1.000 lượt</small>
             </div>
             <div className="visibility-setting">
               <div>
@@ -2943,7 +3051,7 @@ function AdminOrdersManager() {
                         {statusLabel[o.status] ?? o.status}
                       </span>
                     </td>
-                    <td>{money(Number(o.chargeAmount))}</td>
+                    <td>{formatVND(Number(o.chargeAmount))}</td>
                     <td>
                       {o.status === "SUBMISSION_UNKNOWN" ? (
                         <div className="reconcile">
@@ -3300,9 +3408,9 @@ function AdminUsers() {
                     </span>
                   </td>
                   <td>
-                    <b>{money(Number(u.wallet?.balance ?? 0))}</b>
+                    <b>{formatVND(Number(u.wallet?.balance ?? 0))}</b>
                   </td>
-                  <td>{money(Number(u.wallet?.reserved ?? 0))}</td>
+                  <td>{formatVND(Number(u.wallet?.reserved ?? 0))}</td>
                   <td>{new Date(u.createdAt).toLocaleDateString("vi-VN")}</td>
                 </tr>
               ))}
@@ -3403,9 +3511,9 @@ function AdminUsersManager() {
                     </select>
                   </td>
                   <td>
-                    <b>{money(Number(u.wallet?.balance ?? 0))}</b>
+                    <b>{formatVND(Number(u.wallet?.balance ?? 0))}</b>
                   </td>
-                  <td>{money(Number(u.wallet?.reserved ?? 0))}</td>
+                  <td>{formatVND(Number(u.wallet?.reserved ?? 0))}</td>
                   <td>
                     <div className="reconcile">
                       <input
@@ -3491,8 +3599,8 @@ function AdminPayments() {
                   <td>{d.user.email}</td>
                   <td>{d.method}</td>
                   <td>{d.status}</td>
-                  <td>{money(Number(d.requestedVnd))}</td>
-                  <td>{d.creditedVnd ? money(Number(d.creditedVnd)) : "—"}</td>
+                  <td>{formatVND(Number(d.requestedVnd))}</td>
+                  <td>{d.creditedVnd ? formatVND(Number(d.creditedVnd)) : "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -3512,9 +3620,16 @@ function App() {
   const location = useLocation();
   const sessionRevision=useRef(0);
   useEffect(() => {
-    const refresh = () => api<SessionUser>("/auth/me").then(setUser).catch(() => {});
+    let active=true,timer:number|undefined,generation=0;
+    const refresh = () => {
+      const revision=sessionRevision.current,requestGeneration=++generation;
+      window.clearTimeout(timer);
+      api<SessionUser>("/auth/me").then(value=>{if(active&&revision===sessionRevision.current&&requestGeneration===generation)setUser(value);})
+        .catch(()=>{if(active&&revision===sessionRevision.current&&requestGeneration===generation)timer=window.setTimeout(refresh,4000);});
+    };
     window.addEventListener("profile-updated", refresh);
-    return () => window.removeEventListener("profile-updated", refresh);
+    window.addEventListener("wallet-updated", refresh);
+    return () => { active=false;window.clearTimeout(timer);window.removeEventListener("profile-updated", refresh);window.removeEventListener("wallet-updated", refresh); };
   }, []);
   useEffect(() => {
     const controller=new AbortController(),revision=sessionRevision.current;
@@ -3540,6 +3655,7 @@ function App() {
     );
   }
   async function logout() {
+    sessionRevision.current++;
     await api("/auth/logout", { method: "POST" }).catch(() => null);
     setUser(null);
     navigate("/", { replace: true });

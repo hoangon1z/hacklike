@@ -11,7 +11,16 @@ export class ProviderService {
     const url = this.config.get<string>('SMM_PROVIDER_URL');
     const key = this.config.get<string>('SMM_PROVIDER_API_KEY');
     if (!url || !key) throw new Error('PROVIDER_NOT_CONFIGURED');
-    const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, action, ...data }), signal: AbortSignal.timeout(timeoutMs) });
+    const transportUrl = this.config.get<string>('SMM_PROVIDER_TRANSPORT_URL');
+    const transportToken = this.config.get<string>('SMM_TRANSPORT_TOKEN');
+    if (transportUrl && !transportToken) throw new Error('PROVIDER_TRANSPORT_NOT_CONFIGURED');
+    // The transport uses a fixed SubVietnam endpoint; do not silently route another provider there.
+    if (transportUrl && url !== 'https://subvietnam.net/api/v2') throw new Error('PROVIDER_TRANSPORT_URL_MISMATCH');
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (transportUrl) headers.authorization = `Bearer ${transportToken}`;
+    // Browser clearance may take 25s, followed by a single upstream request (20s).
+    // Never retry an add/refill request here: its outcome may already be committed upstream.
+    const response = await fetch(transportUrl || url, { method: 'POST', headers, body: JSON.stringify({ key, action, ...data }), redirect: 'error', signal: AbortSignal.timeout(transportUrl ? 50_000 : timeoutMs) });
     if (!response.ok) throw new Error(`PROVIDER_HTTP_${response.status}`);
     const result = await response.json() as T & { error?: string };
     if (result.error) throw new Error(`PROVIDER_REJECTED:${result.error}`);
