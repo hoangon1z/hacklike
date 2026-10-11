@@ -49,6 +49,9 @@ services:
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
       SMM_TRANSPORT_TOKEN: ${SMM_TRANSPORT_TOKEN:?Set SMM_TRANSPORT_TOKEN in .env.production}
       FLARESOLVERR_URL: http://flaresolverr:8191/v1
+      SMM_PROXY_URL: ${SMM_PROXY_URL:-}
+      SMM_PROXY_USERNAME: ${SMM_PROXY_USERNAME:-}
+      SMM_PROXY_PASSWORD: ${SMM_PROXY_PASSWORD:-}
     depends_on:
       flaresolverr: {condition: service_healthy}
     healthcheck:

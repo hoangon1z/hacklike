@@ -6,6 +6,8 @@ export interface ProviderStatus { charge: string; start_count: string; status: s
 
 @Injectable()
 export class ProviderService {
+  private balanceCache?: { expiresAt: number; value: { balance: string; currency: string } };
+  private balancePending?: Promise<{ balance: string; currency: string }>;
   constructor(private readonly config: ConfigService) {}
   private async call<T>(action: string, data: Record<string, unknown> = {}, timeoutMs = 12_000): Promise<T> {
     const url = this.config.get<string>('SMM_PROVIDER_URL');
@@ -27,8 +29,22 @@ export class ProviderService {
     return result;
   }
   services() { return this.call<ProviderServiceItem[]>('services'); }
-  balance() { return this.call<{ balance: string; currency: string }>('balance'); }
+  balance() {
+    if (this.balanceCache && this.balanceCache.expiresAt > Date.now()) return Promise.resolve(this.balanceCache.value);
+    if (this.balancePending) return this.balancePending;
+    this.balancePending = this.call<{ balance: string; currency: string }>('balance')
+      .then(value => {
+        this.balanceCache = { value, expiresAt: Date.now() + 30_000 };
+        return value;
+      })
+      .finally(() => { this.balancePending = undefined; });
+    return this.balancePending;
+  }
   addOrder(service: string, link: string, quantity: number, comments?: string) { return this.call<{ order: number }>('add', { service, link, quantity, ...(comments ? { comments } : {}) }, 20_000); }
   status(order: string) { return this.call<ProviderStatus>('status', { order }); }
+  statuses(orders: string[]) {
+    if (!orders.length || orders.length > 100) throw new Error('PROVIDER_STATUS_BATCH_SIZE');
+    return this.call<Record<string, ProviderStatus & { error?: string }>>('status', { orders: orders.join(',') });
+  }
   refill(order: string) { return this.call<{refill:string|number}>('refill', { order }); }
 }

@@ -5,12 +5,12 @@ import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
 import { randomUUID } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
-import { ProviderService } from "../provider/provider.service";
+import { ProviderService, ProviderStatus } from "../provider/provider.service";
 import { WalletsService } from "../wallets/wallets.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { providerBalanceVnd } from "../shared/provider-money";
 
-@Processor("orders", { concurrency: 10 })
+@Processor("orders", { concurrency: 3, limiter: { max: 2, duration: 1000 } })
 export class OrderProcessor extends WorkerHost implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
@@ -35,6 +35,7 @@ export class OrderProcessor extends WorkerHost implements OnModuleInit {
   }
   async process(job: Job<{ orderId: string }>) {
     if (job.name === "recover") return this.recoverInterruptedOrders();
+    if (job.name === "status-batch") return this.syncStatusBatch((job.data as unknown as { orderIds: string[] }).orderIds);
     if (job.name === "status") return this.syncStatus(job.data.orderId);
     if (job.name !== "submit") return;
     const order = await this.prisma.order.findUnique({
@@ -193,15 +194,6 @@ export class OrderProcessor extends WorkerHost implements OnModuleInit {
           order.id,
         );
       });
-      await this.queue.add(
-        "status",
-        { orderId: order.id },
-        {
-          jobId: `status-${order.id}-${Date.now()}`,
-          delay: 180_000,
-          removeOnComplete: true,
-        },
-      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "UNKNOWN";
       const knownBalanceError =
@@ -299,17 +291,14 @@ export class OrderProcessor extends WorkerHost implements OnModuleInit {
         updatedAt: { lte: new Date(Date.now() - 300_000) },
       },
       select: { id: true },
-      take: 200,
+      take: 100,
       orderBy: { updatedAt: "asc" },
     });
-    for (const order of staleStatuses)
+    if (staleStatuses.length)
       await this.queue.add(
-        "status",
-        { orderId: order.id },
-        {
-          jobId: `status-recovery-${order.id}-${minute}`,
-          removeOnComplete: true,
-        },
+        "status-batch",
+        { orderIds: staleStatuses.map(order => order.id) },
+        { jobId: `status-batch-${minute}`, removeOnComplete: true },
       );
     return {
       waiting: waiting.length,
@@ -317,7 +306,24 @@ export class OrderProcessor extends WorkerHost implements OnModuleInit {
       statuses: staleStatuses.length,
     };
   }
-  private async syncStatus(orderId: string) {
+  private async syncStatusBatch(orderIds: string[]) {
+    const orders = await this.prisma.order.findMany({
+      where: {
+        id: { in: orderIds },
+        providerOrderId: { not: null },
+        status: { in: ["SUBMITTED", "IN_PROGRESS"] },
+      },
+      select: { id: true, providerOrderId: true },
+      take: 100,
+    });
+    if (!orders.length) return;
+    const results = await this.provider.statuses(orders.map(order => order.providerOrderId!));
+    for (const order of orders) {
+      const result = results[order.providerOrderId!];
+      if (result && !result.error) await this.syncStatus(order.id, result);
+    }
+  }
+  private async syncStatus(orderId: string, suppliedResult?: ProviderStatus) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
     });
@@ -327,7 +333,7 @@ export class OrderProcessor extends WorkerHost implements OnModuleInit {
     )
       return;
     try {
-      const result = await this.provider.status(order.providerOrderId);
+      const result = suppliedResult ?? await this.provider.status(order.providerOrderId);
       const map: Record<
         string,
         "SUBMITTED" | "IN_PROGRESS" | "COMPLETED" | "PARTIAL" | "CANCELED"
@@ -384,26 +390,6 @@ export class OrderProcessor extends WorkerHost implements OnModuleInit {
             "Hoàn tiền phần chưa thực hiện",
           );
       });
-      if (!["COMPLETED", "PARTIAL", "CANCELED"].includes(next))
-        await this.queue.add(
-          "status",
-          { orderId },
-          {
-            jobId: `status-${orderId}-${Date.now()}`,
-            delay: 180_000,
-            removeOnComplete: true,
-          },
-        );
-    } catch {
-      await this.queue.add(
-        "status",
-        { orderId },
-        {
-          jobId: `status-${orderId}-${Date.now()}`,
-          delay: 300_000,
-          removeOnComplete: true,
-        },
-      );
-    }
+    } catch {}
   }
 }
